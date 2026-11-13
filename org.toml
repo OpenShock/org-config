@@ -22,6 +22,15 @@ exclude = [".github", "API", "Frontend", "Firmware"]
 # Other locations GitHub also reads, removed so there is exactly one copy.
 remove = [".github/SECURITY.md", "docs/SECURITY.md"]
 
+# Named users rather than a team: a team is ignored unless it has write access to the repo.
+# The four excluded repos get their CODEOWNERS from the security policy work.
+[[files.managed]]
+path = ".github/CODEOWNERS"
+template = "templates/CODEOWNERS"
+visibility = "public"
+exclude = [".github", "API", "Frontend", "Firmware"]
+remove = ["CODEOWNERS", "docs/CODEOWNERS"]
+
 # --- community health files ---
 # Report-only unless stated otherwise. `files` and `any_of` are regexes matched against the whole path.
 
@@ -75,8 +84,8 @@ pattern = "(secur|vulnerab).*admin@openshock\\.org|admin@openshock\\.org.*(secur
 reason = "inherited from the .github repo"
 exclude = [".github"]
 files = ["(\\.github/|docs/)?(CODE_OF_CONDUCT|SUPPORT)\\.md", "\\.github/VULNERABILITY_REPORT\\.ya?ml"]
-# Set to true to open PRs that remove them instead of reporting them.
-delete = false
+# Removed through a PR, set to false to only report them.
+delete = true
 
 # Not inheritable, every repo needs its own.
 [[community.required_files]]
@@ -163,6 +172,7 @@ PackageProjectUrl = "https://openshock.org"
 
 # --- repository rulesets, matched by name ---
 # Rulesets that are not listed here are reported but never deleted.
+# Planned: let org-sync delete or rewrite the unmanaged ones.
 
 [[rulesets.managed]]
 file = "rulesets/main-branches.json"
