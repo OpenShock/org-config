@@ -18,6 +18,7 @@ class Config:
             self.data = tomllib.load(f)
         self.org: str = self.data['org']
         self.bot_account: str | None = self.data.get('bot_account')
+        self.bot_app: bool = self.data.get('bot_app', False)
         self.exclude = {r.lower() for r in self.data.get('exclude', [])}
 
     def section(self, name: str) -> dict:

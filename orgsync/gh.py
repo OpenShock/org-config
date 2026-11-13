@@ -104,5 +104,11 @@ def graphql(query: str, variables: dict | None = None) -> dict:
     return json.loads(out)['data']
 
 
-def current_login() -> str:
-    return api('user')['login']
+def current_login() -> str | None:
+    """The user gh is logged in as, None for a GitHub App token, which is no user."""
+    try:
+        return api('user')['login']
+    except GhError as e:
+        if e.status == 403:
+            return None
+        raise

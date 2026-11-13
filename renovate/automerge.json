@@ -22,18 +22,6 @@
       "automerge": true
     },
     {
-      "description": "The pnpm patch is keyed to an exact SignalR version, so bumps need the patch refreshed by hand",
-      "matchPackageNames": ["@microsoft/signalr"],
-      "groupName": null,
-      "automerge": false
-    },
-    {
-      "description": "FlatSharp changes generated code, so it gets its own PR and a human",
-      "matchPackageNames": ["FlatSharp.**"],
-      "groupName": "flatsharp",
-      "automerge": false
-    },
-    {
       "description": "The .NET SDK pin and images are bumped by hand",
       "matchPackageNames": ["dotnet-sdk", "mcr.microsoft.com/dotnet/sdk", "mcr.microsoft.com/dotnet/aspnet", "mcr.microsoft.com/dotnet/runtime"],
       "automerge": false

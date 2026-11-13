@@ -8,7 +8,7 @@ from unittest import mock
 from orgsync import apply, gh
 from orgsync.checks import BY_NAME, actions, branches, community, files, msbuild, rulesets
 from orgsync.config import Config
-from orgsync.model import Repo
+from orgsync.model import Repo, Result
 
 NOW = datetime.datetime(2026, 11, 13, tzinfo=datetime.UTC)
 
@@ -204,6 +204,19 @@ class RulesetFiles(unittest.TestCase):
         self.assertEqual(saved, ruleset('Tag Protection!', 'deletion', bypass=[BOT]))
         self.assertIn('Tag Protection!', rulesets.desired_rulesets(Repo('Org', 'Other', 'main', 'abc', False), cfg))
 
+    def test_app_bypasses_only_what_blocks_the_default_branch(self):
+        cfg = self.config(extra={
+            'rulesets/repos/Lib/release.json': {**ruleset('release', 'pull_request'), 'conditions': {'ref_name': {'include': ['refs/heads/release'], 'exclude': []}}},
+            'rulesets/repos/Lib/named.json': {**ruleset('named', 'update', bypass=[BOT]), 'conditions': {'ref_name': {'include': ['refs/heads/dev'], 'exclude': []}}},
+        })
+        cfg.data['rulesets']['direct_commit_app'] = 42
+        app = {'actor_id': 42, 'actor_type': 'Integration', 'bypass_mode': 'always'}
+        wanted = rulesets.desired_rulesets(Repo('Org', 'Lib', 'dev', 'abc', False), cfg)
+        self.assertEqual(wanted['reviews']['bypass_actors'], [app])
+        self.assertEqual(wanted['named']['bypass_actors'], [BOT, app])
+        # Deletion rules do not stop a commit, and `release` is not the default branch.
+        self.assertEqual([wanted[n]['bypass_actors'] for n in ('main', 'tags', 'release')], [[], [], []])
+
     def test_folders_and_bypass_entries_must_name_a_repo(self):
         cfg = self.config(extra={'templates/own/Gone/renovate.json': '{}'})
         cfg.data['files'] = {'managed': [{'path': 'renovate.json', 'template': 't', 'overrides': 'templates/own'}]}
@@ -247,6 +260,26 @@ class ManagedFiles(unittest.TestCase):
 
     def test_repo_folder_replaces_the_shared_template(self):
         self.assertEqual(files.check(self.repo('special', 'old'), self.cfg).files, {'renovate.json': 'special'})
+
+    def test_direct_files_stay_out_of_the_pull_request(self):
+        self.cfg.data['files']['managed'][0]['direct'] = True
+        result = files.check(self.repo('Plain', 'old'), self.cfg)
+        self.assertEqual((result.direct, result.details, result.direct_details), ({'renovate.json'}, [], ['update `renovate.json`']))
+        other = Result(files={'SECURITY.md': 'x'}, details=['add `SECURITY.md`'])
+        results = [(BY_NAME['files'], result), (BY_NAME['community'], other)]
+        self.assertEqual(apply.merge(results), ({'SECURITY.md': 'x'}, '### community\n- add `SECURITY.md`'))
+        self.assertEqual(apply.merge_direct(results), ({'renovate.json': 'shared'}, '- update `renovate.json`'))
+
+    def test_direct_commit_comes_first_and_can_stand_alone(self):
+        self.cfg.data['files']['managed'][0]['direct'] = True
+        results = [(BY_NAME['files'], files.check(self.repo('Plain', 'old'), self.cfg)),
+                   (BY_NAME['community'], Result(files={'SECURITY.md': 'x'}))]
+        calls = []
+        with mock.patch.object(apply, 'deliver_files', lambda repo, files, body, direct: calls.append((sorted(files), direct)) or 'ok'):
+            apply.apply(self.repo('Plain', 'old'), results, direct=False, only_direct=True)
+            self.assertEqual(calls, [(['renovate.json'], True)])
+            apply.apply(self.repo('Plain', 'old'), results, direct=False)
+            self.assertEqual(calls[1:], [(['renovate.json'], True), (['SECURITY.md'], False)])
 
 
 class Merge(unittest.TestCase):

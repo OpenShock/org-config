@@ -69,12 +69,13 @@ def print_plan(plan: Plan, show_diff: bool) -> tuple[int, int]:
         lines = []
         for check, result in results:
             for path, content in result.files.items():
-                lines.append(f'  [{check.name}] {"delete" if content is None else "write"} {path}')
+                where = f', straight to {repo.default_branch}' if path in result.direct else ''
+                lines.append(f'  [{check.name}] {"delete" if content is None else "write"} {path}{where}')
                 if show_diff:
                     before = (repo.read(path) or '').splitlines()
                     after = (content or '').splitlines()
                     lines += [f'      {d}' for d in difflib.unified_diff(before, after, 'current', 'desired', lineterm='', n=2)]
-            lines += [f'  [{check.name}]   {d}' for d in result.details]
+            lines += [f'  [{check.name}]   {d}' for d in result.details + result.direct_details]
             lines += [f'  [{check.name}] {c.summary}' for c in result.api]
             lines += [f'  [{check.name}] ! {n}' for n in result.notes]
             changes += len(result.files) + len(result.api)
@@ -95,6 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--check', nargs='+', default=[], choices=list(BY_NAME), help='run only these checks')
     parser.add_argument('--diff', action='store_true', help='show file diffs in the plan')
     parser.add_argument('--direct', action='store_true', help='commit to the default branch instead of opening PRs')
+    parser.add_argument('--only-direct', action='store_true', help='apply only the files that go straight to the default branch')
     parser.add_argument('--yes', action='store_true', help='apply without asking')
     parser.add_argument('--jobs', type=int, default=8)
     args = parser.parse_args(argv)
@@ -131,9 +133,13 @@ def main(argv: list[str] | None = None) -> int:
     if held_back:
         print(f'not applying {", ".join(held_back)}: destructive, name it with --check to apply')
     todo = [(repo, [(c, r) for c, r in results if r.drift and c.name not in held_back]) for repo, results in plan]
+    if args.only_direct:
+        todo = [(repo, [(c, r) for c, r in results if r.direct]) for repo, results in todo]
     todo = [(repo, results) for repo, results in todo if results]
     login = gh.current_login()
-    if cfg.bot_account and login != cfg.bot_account:
+    if login is None and cfg.bot_app:
+        login = 'the GitHub App'
+    elif cfg.bot_account and login != cfg.bot_account:
         print(f'gh is logged in as {login}, expected {cfg.bot_account}: run `gh auth switch -u {cfg.bot_account}` first')
         return 2
     if not args.yes:
@@ -145,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
 
     failed = False
     for repo, results in todo:
-        for line in apply(repo, results, args.direct):
+        for line in apply(repo, results, args.direct, args.only_direct):
             failed |= line.startswith('FAILED')
             print(f'{repo.name}: {line}')
     return 1 if failed else 0

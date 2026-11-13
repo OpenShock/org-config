@@ -5,6 +5,8 @@
 org = "OpenShock"
 # `apply` refuses to run as anyone else.
 bot_account = "hhvrc"
+# Except as a GitHub App, which is how .github/workflows/sync-direct.yml runs it.
+bot_app = true
 # Repos no check should ever touch.
 exclude = []
 
@@ -39,6 +41,8 @@ path = "renovate.json"
 template = "templates/renovate/shared/renovate.json"
 overrides = "templates/renovate/repos"
 only_existing = true
+# Committed straight to the default branch instead of going through a pull request.
+direct = true
 
 # --- community health files ---
 # Report-only unless stated otherwise. `files` and `any_of` are regexes matched against the whole path.
@@ -157,6 +161,9 @@ PackageProjectUrl = "https://openshock.org"
 # Rulesets on GitHub with no file here are deleted, so the files are the only source of truth.
 # Set to false to only report them.
 prune = true
+# App id of the GitHub App the sync workflow runs as.
+# It is added as a bypass actor to every ruleset that would stop a commit to a repo's default branch.
+# direct_commit_app = 0
 
 [[rulesets.managed]]
 file = "rulesets/shared/main-branches.json"

@@ -42,7 +42,11 @@ def _commit(repo: Repo, branch: str, head: str, files: dict[str, str | None], ti
         'message': {'headline': title, 'body': body},
         'fileChanges': {'additions': additions, 'deletions': deletions},
     }})
-    return data['createCommitOnBranch']['commit']['url']
+    commit = data['createCommitOnBranch']['commit']
+    if branch == repo.default_branch:
+        # Anything committed after this must build on it.
+        repo.head_oid = commit['oid']
+    return commit['url']
 
 
 def merge(results: list[tuple[Check, Result]]) -> tuple[dict[str, str | None], str]:
@@ -50,11 +54,22 @@ def merge(results: list[tuple[Check, Result]]) -> tuple[dict[str, str | None], s
     files: dict[str, str | None] = {}
     sections = []
     for check, result in results:
-        if not result.files:
+        proposed = {p: c for p, c in result.files.items() if p not in result.direct}
+        if not proposed:
             continue
-        files.update(result.files)
+        files.update(proposed)
         sections.append('\n'.join([f'### {check.name}', *(f'- {d}' for d in result.details)]))
     return files, '\n\n'.join(sections)
+
+
+def merge_direct(results: list[tuple[Check, Result]]) -> tuple[dict[str, str | None], str]:
+    """The file changes that skip the pull request, plus a commit message body."""
+    files: dict[str, str | None] = {}
+    lines = []
+    for _, result in results:
+        files.update({p: c for p, c in result.files.items() if p in result.direct})
+        lines += [f'- {d}' for d in result.direct_details]
+    return files, '\n'.join(lines)
 
 
 def deliver_files(repo: Repo, files: dict[str, str | None], body: str, direct: bool) -> str:
@@ -94,9 +109,17 @@ def deliver_files(repo: Repo, files: dict[str, str | None], body: str, direct: b
     return f'opened {pr["html_url"]}'
 
 
-def apply(repo: Repo, results: list[tuple[Check, Result]], direct: bool) -> list[str]:
+def apply(repo: Repo, results: list[tuple[Check, Result]], direct: bool, only_direct: bool = False) -> list[str]:
     """Applies everything planned for one repo, returning a line per action taken or failed."""
     log = []
+    files, body = merge_direct(results)
+    if files:
+        try:
+            log.append(deliver_files(repo, files, body, direct=True))
+        except gh.GhError as e:
+            log.append(f'FAILED to commit files: {e.message}')
+    if only_direct:
+        return log
     files, body = merge(results)
     if files:
         try:

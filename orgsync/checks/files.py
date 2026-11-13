@@ -31,7 +31,12 @@ def check(repo: Repo, cfg: Config) -> Result:
         current = repo.read(path)
         if current != wanted:
             result.files[path] = wanted
-            result.details.append(f'{"update" if current is not None else "add"} `{path}`')
+            detail = f'{"update" if current is not None else "add"} `{path}`'
+            if rule.get('direct', False):
+                result.direct.add(path)
+                result.direct_details.append(detail)
+            else:
+                result.details.append(detail)
         # Copies in other locations would shadow or contradict the managed one.
         for other in rule.get('remove', []):
             if other in repo.tree:

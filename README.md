@@ -18,11 +18,12 @@ python -m orgsync plan --check rulesets     # one check
 python -m orgsync apply                     # one PR per repo, plus settings and rulesets
 python -m orgsync apply --direct            # commit to default branches instead of opening PRs
 python -m orgsync apply --check branches    # delete orphaned branches
+python -m orgsync apply --only-direct       # only the files that skip the PR, see renovate.json
 ```
 
 `plan` exits with 1 when there is drift, so it can run on a schedule.
 `apply` prints the plan first and asks before doing anything.
-It refuses to run unless `gh` is logged in as the `bot_account` from `org.toml`.
+It refuses to run unless `gh` is logged in as the `bot_account` from `org.toml`, or holds a GitHub App token when `bot_app = true`.
 
 ## Rate limits
 
@@ -69,6 +70,21 @@ templates/renovate/
 
 Renovate opens a pull request for every update and merges minor, patch and digest updates itself once CI passes.
 Major updates always wait for a human.
+
+Rules for everyone go into `renovate/`, and take effect as soon as they are on `master`.
+Rules for one repo go into that repo's file here, as extra `extends` or `packageRules` next to the two shared presets.
+A rule added to `renovate.json` in the repo itself is overwritten on the next sync.
+
+`renovate.json` is marked `direct = true` in `org.toml`, so it is committed straight to each default branch instead of going through a pull request.
+The `sync-direct` workflow does that whenever `templates/renovate/` or `org.toml` changes on `master`.
+It runs as a GitHub App, which needs:
+
+| Where | What |
+| --- | --- |
+| The app | Repository permission Contents: read and write, installed on all repos |
+| `org-config` variable `ORG_SYNC_APP_CLIENT_ID` | The app's client ID |
+| `org-config` secret `ORG_SYNC_APP_PRIVATE_KEY` | A private key of the app |
+| `org.toml`, `direct_commit_app` | The app's numeric id, so the rulesets let it commit to default branches |
 
 ### actions
 

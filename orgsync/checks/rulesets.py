@@ -40,8 +40,35 @@ def normalize(ruleset: dict, like: dict | None = None) -> dict:
     }
 
 
+# Rules that reject a commit made straight to a branch.
+BLOCKS_COMMITS = {'pull_request', 'update', 'required_status_checks', 'required_deployments', 'merge_queue'}
+
+
+def blocks_default_branch(ruleset: dict, repo: Repo) -> bool:
+    """Whether a ruleset stops a direct commit to the repo's default branch."""
+    if ruleset.get('target', 'branch') != 'branch' or ruleset.get('enforcement', 'active') != 'active':
+        return False
+    include = ((ruleset.get('conditions') or {}).get('ref_name') or {}).get('include', [])
+    if not {'~ALL', '~DEFAULT_BRANCH', f'refs/heads/{repo.default_branch}'} & set(include):
+        return False
+    return any(rule['type'] in BLOCKS_COMMITS for rule in ruleset.get('rules', []))
+
+
 def desired_rulesets(repo: Repo, cfg: Config) -> dict[str, dict]:
     """Every ruleset this repo should have, by name: the shared ones assigned to it plus its own folder."""
+    wanted = _from_files(repo, cfg)
+    app = cfg.section('rulesets').get('direct_commit_app')
+    if app:
+        # The app that commits managed files straight to default branches must get past whatever protects them.
+        actor = {'actor_id': app, 'actor_type': 'Integration', 'bypass_mode': 'always'}
+        for ruleset in wanted.values():
+            others = [a for a in ruleset.get('bypass_actors', []) if (a.get('actor_id'), a['actor_type']) != (app, 'Integration')]
+            if blocks_default_branch(ruleset, repo):
+                ruleset['bypass_actors'] = [*others, actor]
+    return wanted
+
+
+def _from_files(repo: Repo, cfg: Config) -> dict[str, dict]:
     wanted: dict[str, dict] = {}
     for rule in cfg.section('rulesets').get('managed', []):
         if not applies(repo, rule):

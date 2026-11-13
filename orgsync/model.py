@@ -22,6 +22,8 @@ class Result:
     api: list[ApiChange] = field(default_factory=list)
     details: list[str] = field(default_factory=list)  # explains the changes, ends up in the PR body
     notes: list[str] = field(default_factory=list)  # needs a human, nothing is changed
+    direct: set[str] = field(default_factory=set)  # paths in `files` that skip the PR and go straight to the default branch
+    direct_details: list[str] = field(default_factory=list)  # explains those, ends up in the commit message
 
     @property
     def drift(self) -> bool:
