@@ -6,6 +6,7 @@ import yaml
 
 from ..config import Config, applies
 from ..model import Repo, Result
+from .files import managed_paths
 
 TEMPLATE_DIR = '.github/ISSUE_TEMPLATE/'
 ADVISORY_SUFFIX = '/security/advisories/new'
@@ -67,8 +68,12 @@ def check(repo: Repo, cfg: Config) -> Result:
     if repo.name == '.github' and repo.private:
         result.notes.append('the .github repo is private, no repo inherits its community files')
 
+    # A file the files check is about to add is not missing.
+    managed = managed_paths(repo, cfg)
     for rule in section.get('required_files', []):
-        if applies(repo, rule) and not _matching(repo, rule['any_of']):
+        if not applies(repo, rule) or _matching(repo, rule['any_of']):
+            continue
+        if not any(re.fullmatch(pattern, path) for pattern in rule['any_of'] for path in managed):
             result.notes.append(f'missing {rule["name"]}')
 
     for rule in section.get('forbidden_files', []):

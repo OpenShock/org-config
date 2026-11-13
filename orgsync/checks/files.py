@@ -22,3 +22,8 @@ def check(repo: Repo, cfg: Config) -> Result:
                 result.files[other] = None
                 result.details.append(f'remove `{other}` in favour of `{path}`')
     return result
+
+
+def managed_paths(repo: Repo, cfg: Config) -> set[str]:
+    """Paths the managed-file rules guarantee for this repo, whether or not they exist yet."""
+    return {rule['path'] for rule in cfg.section('files').get('managed', []) if applies(repo, rule)}
