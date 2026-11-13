@@ -6,6 +6,10 @@ import tomllib
 from .model import Repo
 
 
+class ConfigError(Exception):
+    pass
+
+
 class Config:
 
     def __init__(self, path: pathlib.Path):
@@ -21,6 +25,23 @@ class Config:
 
     def path(self, relative: str) -> pathlib.Path:
         return self.root / relative
+
+    def unknown_repos(self, names: list[str]) -> list[str]:
+        """Per-repo folders and settings that name no active repo.
+
+        A misspelled or renamed repo would otherwise lose its own files without anyone noticing.
+        """
+        known = {n.lower() for n in names}
+        folders = ['rulesets/repos', *(r['overrides'] for r in self.section('files').get('managed', []) if 'overrides' in r)]
+        problems = [
+            f'{folder}/{child.name}'
+            for folder in folders
+            for child in sorted(self.path(folder).glob('*'))
+            if child.is_dir() and child.name.lower() not in known
+        ]
+        for rule in self.section('rulesets').get('managed', []):
+            problems += [f'extra_bypass.{name} for {rule["file"]}' for name in rule.get('extra_bypass', {}) if name.lower() not in known]
+        return problems
 
 
 def applies(repo: Repo, rule: dict) -> bool:

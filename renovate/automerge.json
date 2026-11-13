@@ -1,0 +1,42 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Non-major updates merge themselves through a pull request once CI passes",
+  "automergeType": "pr",
+  "platformAutomerge": false,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true
+  },
+  "packageRules": [
+    {
+      "description": "GitHub Actions digest, patch and minor bumps",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "matchUpdateTypes": ["digest", "pinDigest", "patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Minor and patch bumps of dependencies, majors always wait for a human",
+      "matchManagers": ["npm", "nuget", "gomod", "pip_requirements", "pep621", "poetry"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "The pnpm patch is keyed to an exact SignalR version, so bumps need the patch refreshed by hand",
+      "matchPackageNames": ["@microsoft/signalr"],
+      "groupName": null,
+      "automerge": false
+    },
+    {
+      "description": "FlatSharp changes generated code, so it gets its own PR and a human",
+      "matchPackageNames": ["FlatSharp.**"],
+      "groupName": "flatsharp",
+      "automerge": false
+    },
+    {
+      "description": "The .NET SDK pin and images are bumped by hand",
+      "matchPackageNames": ["dotnet-sdk", "mcr.microsoft.com/dotnet/sdk", "mcr.microsoft.com/dotnet/aspnet", "mcr.microsoft.com/dotnet/runtime"],
+      "automerge": false
+    }
+  ]
+}

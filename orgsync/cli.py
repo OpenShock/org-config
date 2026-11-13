@@ -9,7 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from . import gh
 from .apply import apply
 from .checks import BY_NAME, CHECKS, Check, run
-from .config import Config
+from .checks.rulesets import import_missing
+from .config import Config, ConfigError
 from .model import Repo, Result, list_repos, load_tree
 
 # A full plan needs a few hundred requests, do not start one that cannot finish.
@@ -19,7 +20,11 @@ Plan = list[tuple[Repo, list[tuple[Check, Result]]]]
 
 
 def build_plan(cfg: Config, checks: list[Check], only: list[str], skip: list[str], jobs: int) -> Plan:
-    repos = [r for r in list_repos(cfg.org) if r.name.lower() not in cfg.exclude]
+    everything = list_repos(cfg.org)
+    unknown = cfg.unknown_repos([r.name for r in everything])
+    if unknown:
+        raise ConfigError('these name no active repo in the org: ' + ', '.join(unknown))
+    repos = [r for r in everything if r.name.lower() not in cfg.exclude]
     if only:
         wanted = {r.lower() for r in only}
         repos = [r for r in repos if r.name.lower() in wanted]
@@ -41,6 +46,21 @@ def build_plan(cfg: Config, checks: list[Check], only: list[str], skip: list[str
 
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         return list(zip(repos, pool.map(examine, repos)))
+
+
+def import_rulesets(cfg: Config, only: list[str], skip: list[str]) -> int:
+    """Copies rulesets that only exist on GitHub into rulesets/repos/, changing nothing on GitHub."""
+    wanted, skipped = {r.lower() for r in only}, {r.lower() for r in skip}
+    count = 0
+    for repo in list_repos(cfg.org):
+        name = repo.name.lower()
+        if name in cfg.exclude or name in skipped or (wanted and name not in wanted) or repo.private:
+            continue
+        for path in import_missing(repo, cfg):
+            print(f'wrote {path}')
+            count += 1
+    print(f'{count} ruleset(s) imported')
+    return 0
 
 
 def print_plan(plan: Plan, show_diff: bool) -> tuple[int, int]:
@@ -68,7 +88,7 @@ def print_plan(plan: Plan, show_diff: bool) -> tuple[int, int]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='orgsync', description='Keep every repo in a GitHub org in the same state.')
-    parser.add_argument('command', choices=['plan', 'apply'])
+    parser.add_argument('command', choices=['plan', 'apply', 'import-rulesets'])
     parser.add_argument('--config', default='org.toml', type=pathlib.Path)
     parser.add_argument('--only', nargs='+', default=[], metavar='REPO', help='limit to these repos')
     parser.add_argument('--skip', nargs='+', default=[], metavar='REPO', help='leave these repos out')
@@ -86,12 +106,19 @@ def main(argv: list[str] | None = None) -> int:
         # Destructive checks are still planned, so their findings stay visible.
         checks = list(CHECKS)
 
+    if args.command == 'import-rulesets':
+        return import_rulesets(cfg, args.only, args.skip)
+
     before = gh.rate_limits()
     low = [f'{name} {before[name]["remaining"]}' for name in ('core', 'graphql') if before[name]['remaining'] < MIN_BUDGET]
     if low:
         print(f'not enough API budget left this hour ({", ".join(low)}), try again later')
         return 2
-    plan = build_plan(cfg, checks, args.only, args.skip, args.jobs)
+    try:
+        plan = build_plan(cfg, checks, args.only, args.skip, args.jobs)
+    except ConfigError as e:
+        print(f'refusing to run, {e}')
+        return 2
     changes, _ = print_plan(plan, args.diff)
     after = gh.rate_limits()
     print('API budget: ' + ', '.join(

@@ -1,8 +1,14 @@
 import datetime
+import json
+import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
-from orgsync import apply
-from orgsync.checks import BY_NAME, actions, branches, community, msbuild, rulesets
+from orgsync import apply, gh
+from orgsync.checks import BY_NAME, actions, branches, community, files, msbuild, rulesets
+from orgsync.config import Config
+from orgsync.model import Repo
 
 NOW = datetime.datetime(2026, 11, 13, tzinfo=datetime.UTC)
 
@@ -79,8 +85,168 @@ class Rulesets(unittest.TestCase):
                 'rules': [{'type': 'deletion', 'parameters': {'x': 1}}],
                 'conditions': {'ref_name': {'include': ['a', 'b'], 'exclude': []}}, 'bypass_actors': []}
         self.assertEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
+        desired['rules'].append({'type': 'pull_request', 'parameters': {'required_approving_review_count': 1}})
+        live['rules'].append({'type': 'pull_request', 'parameters': {'required_approving_review_count': 1, 'allowed_merge_methods': ['squash']}})
+        self.assertEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
+        live['rules'][1]['parameters']['required_approving_review_count'] = 2
+        self.assertNotEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
+        live['rules'][1]['parameters']['required_approving_review_count'] = 1
         live['rules'].append({'type': 'non_fast_forward'})
         self.assertNotEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
+
+
+def make_config(root: pathlib.Path, toml: str, files: dict[str, object]) -> Config:
+    for path, content in files.items():
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content if isinstance(content, str) else json.dumps(content), encoding='utf-8')
+    (root / 'org.toml').write_text('org = "Org"\n' + toml, encoding='utf-8')
+    return Config(root / 'org.toml')
+
+
+def ruleset(name: str, *rules: str, bypass: list | None = None) -> dict:
+    return {'name': name, 'target': 'branch', 'enforcement': 'active',
+            'conditions': {'ref_name': {'include': ['~DEFAULT_BRANCH'], 'exclude': []}},
+            'rules': [{'type': r} for r in rules], 'bypass_actors': bypass or []}
+
+
+BOT = {'actor_id': 7, 'actor_type': 'Integration', 'bypass_mode': 'always'}
+RULESETS_TOML = '''
+[rulesets]
+prune = {prune}
+[[rulesets.managed]]
+file = "rulesets/shared/main.json"
+[[rulesets.managed]]
+file = "rulesets/shared/reviews.json"
+include = ["App", "Lib"]
+[rulesets.managed.extra_bypass]
+app = [{{ actor_id = 7, actor_type = "Integration", bypass_mode = "always" }}]
+'''
+
+
+class FakeGitHub:
+    """Answers the ruleset endpoints from a dict of live rulesets and records nothing else."""
+
+    def __init__(self, live: list[dict] | None):
+        self.live = live
+
+    def __call__(self, path, method='GET', body=None, paginate=False):
+        if self.live is None:
+            raise gh.GhError(403, 'Upgrade to GitHub Pro')
+        if '/rulesets?' in path:
+            return [{'id': r['id'], 'name': r['name'], 'enforcement': r['enforcement'], 'source_type': 'Repository'} for r in self.live]
+        return next(r for r in self.live if path.endswith(f'/rulesets/{r["id"]}'))
+
+
+class RulesetFiles(unittest.TestCase):
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = pathlib.Path(tmp.name)
+
+    def config(self, prune: bool = False, extra: dict | None = None) -> Config:
+        return make_config(self.root, RULESETS_TOML.format(prune=str(prune).lower()), {
+            'rulesets/shared/main.json': ruleset('main', 'deletion'),
+            'rulesets/shared/reviews.json': ruleset('reviews', 'pull_request'),
+            'rulesets/repos/Lib/tags.json': ruleset('tags', 'deletion'),
+            'rulesets/repos/Lib/anything.json': ruleset('main', 'deletion', 'non_fast_forward'),
+            **(extra or {}),
+        })
+
+    def plan(self, repo: Repo, cfg: Config, live: list[dict] | None):
+        with mock.patch.object(gh, 'api', FakeGitHub(live)):
+            return rulesets.check(repo, cfg)
+
+    def test_shared_rulesets_follow_include(self):
+        wanted = rulesets.desired_rulesets(Repo('Org', 'Other', 'main', 'abc', False), self.config())
+        self.assertEqual(list(wanted), ['main'])
+
+    def test_repo_folder_adds_and_replaces_by_name(self):
+        wanted = rulesets.desired_rulesets(Repo('Org', 'lib', 'main', 'abc', False), self.config())
+        self.assertEqual(sorted(wanted), ['main', 'reviews', 'tags'])
+        self.assertEqual([r['type'] for r in wanted['main']['rules']], ['deletion', 'non_fast_forward'])
+
+    def test_extra_bypass_is_per_repo(self):
+        cfg = self.config()
+        self.assertEqual(rulesets.desired_rulesets(Repo('Org', 'App', 'main', 'abc', False), cfg)['reviews']['bypass_actors'], [BOT])
+        self.assertEqual(rulesets.desired_rulesets(Repo('Org', 'Lib', 'main', 'abc', False), cfg)['reviews']['bypass_actors'], [])
+
+    def test_create_update_and_leave_alone(self):
+        live = [{**ruleset('main', 'deletion'), 'id': 1}, {**ruleset('reviews', 'pull_request', bypass=[]), 'id': 2}]
+        result = self.plan(Repo('Org', 'App', 'main', 'abc', False), self.config(), live)
+        self.assertEqual([(c.method, c.endpoint) for c in result.api], [('PUT', 'repos/Org/App/rulesets/2')])
+        self.assertEqual(result.api[0].body['bypass_actors'], [BOT])
+        result = self.plan(Repo('Org', 'Other', 'main', 'abc', False), self.config(), [])
+        self.assertEqual([(c.method, c.endpoint) for c in result.api], [('POST', 'repos/Org/Other/rulesets')])
+
+    def test_unmanaged_is_reported_or_pruned(self):
+        repo = Repo('Org', 'Other', 'main', 'abc', False)
+        live = [{**ruleset('main', 'deletion'), 'id': 1}, {**ruleset('old', 'deletion'), 'id': 9}]
+        result = self.plan(repo, self.config(prune=False), live)
+        self.assertEqual((result.api, result.notes), ([], ['unmanaged ruleset `old` (active)']))
+        result = self.plan(repo, self.config(prune=True), live)
+        self.assertEqual([(c.method, c.endpoint) for c in result.api], [('DELETE', 'repos/Org/Other/rulesets/9')])
+        self.assertEqual(result.notes, [])
+
+    def test_free_plan_is_a_note_and_never_a_change(self):
+        result = self.plan(Repo('Org', 'Other', 'main', 'abc', True), self.config(prune=True), None)
+        self.assertEqual((result.api, len(result.notes)), ([], 1))
+
+    def test_import_writes_only_what_has_no_file(self):
+        cfg = self.config()
+        live = [{**ruleset('main', 'deletion'), 'id': 1},
+                {**ruleset('Tag Protection!', 'deletion', bypass=[{**BOT, 'extra': 'dropped'}]), 'id': 2, 'node_id': 'x'}]
+        with mock.patch.object(gh, 'api', FakeGitHub(live)):
+            written = rulesets.import_missing(Repo('Org', 'Other', 'main', 'abc', False), cfg)
+        self.assertEqual(written, ['rulesets/repos/Other/tag-protection.json'])
+        saved = json.loads((self.root / written[0]).read_text(encoding='utf-8'))
+        self.assertEqual(saved, ruleset('Tag Protection!', 'deletion', bypass=[BOT]))
+        self.assertIn('Tag Protection!', rulesets.desired_rulesets(Repo('Org', 'Other', 'main', 'abc', False), cfg))
+
+    def test_folders_and_bypass_entries_must_name_a_repo(self):
+        cfg = self.config(extra={'templates/own/Gone/renovate.json': '{}'})
+        cfg.data['files'] = {'managed': [{'path': 'renovate.json', 'template': 't', 'overrides': 'templates/own'}]}
+        self.assertEqual(cfg.unknown_repos(['app', 'LIB', 'Other']), ['templates/own/Gone'])
+        self.assertEqual(cfg.unknown_repos(['Other', 'Gone']), ['rulesets/repos/Lib', 'extra_bypass.app for rulesets/shared/reviews.json'])
+
+
+FILES_TOML = '''
+[[files.managed]]
+path = "renovate.json"
+template = "templates/shared.json"
+overrides = "templates/repos"
+only_existing = true
+'''
+
+
+class ManagedFiles(unittest.TestCase):
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.cfg = make_config(pathlib.Path(tmp.name), FILES_TOML, {
+            'templates/shared.json': 'shared',
+            'templates/repos/Special/renovate.json': 'special',
+        })
+
+    def repo(self, name: str, content: str | None) -> Repo:
+        repo = Repo('Org', name, 'main', 'abc', False)
+        if content is not None:
+            repo.tree, repo._files = ['renovate.json'], {'renovate.json': content}
+        return repo
+
+    def test_never_added_to_a_repo_without_it(self):
+        repo = self.repo('Plain', None)
+        self.assertEqual(files.check(repo, self.cfg).files, {})
+        self.assertEqual(files.managed_paths(repo, self.cfg), set())
+
+    def test_existing_file_follows_the_shared_template(self):
+        self.assertEqual(files.check(self.repo('Plain', 'old'), self.cfg).files, {'renovate.json': 'shared'})
+        self.assertEqual(files.check(self.repo('Plain', 'shared'), self.cfg).files, {})
+
+    def test_repo_folder_replaces_the_shared_template(self):
+        self.assertEqual(files.check(self.repo('special', 'old'), self.cfg).files, {'renovate.json': 'special'})
 
 
 class Merge(unittest.TestCase):

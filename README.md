@@ -37,11 +37,11 @@ All of them are configured in [`org.toml`](org.toml).
 
 | Check | Keeps even | How it is applied |
 | --- | --- | --- |
-| `files` | Managed files such as `SECURITY.md`, copied from `templates/` | PR |
+| `files` | Managed files such as `SECURITY.md` and `renovate.json`, copied from `templates/` | PR |
 | `community` | Rules about community files: required, forbidden, must contain, must not contain; issue template security link | Notes, PR for a missing issue template `config.yml` |
 | `actions` | An allowlist of actions, and banned actions | Notes, PR for a rewritten banned action |
 | `msbuild` | Selected properties in `Directory.Build.props` | PR |
-| `rulesets` | Repository rulesets from `rulesets/*.json` | API |
+| `rulesets` | Repository rulesets, shared ones and per-repo ones | API |
 | `settings` | Merge policy and security features | API |
 | `branches` | Deletes orphaned `feat/`, `fix/`, `chore/`, ... branches | API, only with `--check branches` |
 
@@ -56,6 +56,20 @@ Lines starting with `!` in the plan are notes: things the tool noticed but will 
 A repo-level `SECURITY.md` replaces the org default entirely, so the stub never restates scope or rules that could drift.
 `.github`, `API`, `Frontend` and `Firmware` are excluded because they carry hand-written policies; the `community` check verifies those still contain the shared reporting block.
 
+### renovate.json
+
+Only repos that already have a `renovate.json` are kept in step, Renovate is never added to a repo.
+
+```
+renovate/                        presets, read by Renovate straight from this repo
+templates/renovate/
+  shared/renovate.json           the file every repo gets, it only extends the presets
+  repos/<Repo>/renovate.json     the whole file for a repo with needs of its own
+```
+
+Renovate opens a pull request for every update and merges minor, patch and digest updates itself once CI passes.
+Major updates always wait for a human.
+
 ### actions
 
 Actions that are neither from an allowed owner nor individually allowed are reported, and so are banned ones.
@@ -66,8 +80,27 @@ Action versions and SHA pins are not touched, see below.
 
 ### rulesets
 
-Rulesets are matched by name.
-Rulesets that exist on a repo but not in `org.toml` are reported and never deleted.
+```
+rulesets/
+  shared/            used by many repos, assigned to repos in org.toml
+  repos/<Repo>/      for that one repo, picked up automatically
+```
+
+Rulesets are matched by the `name` field inside the file, the filename does not matter.
+A ruleset in a repo's folder with the same `name` as a shared one replaces the shared one for that repo.
+`python -m orgsync import-rulesets` copies rulesets that exist on GitHub but not here into `rulesets/repos/`, without changing anything on GitHub.
+
+Rulesets on GitHub that have no file are deleted, or only reported when `prune = false` is set in `org.toml`.
+A folder in `rulesets/repos/` that names no active repo stops the run, so a renamed repo cannot lose its rulesets unnoticed.
+
+| Shared ruleset | Repos | Effect |
+| --- | --- | --- |
+| `main-branches` | all | No force-push and no deletion of `master`, `main`, `develop`, `beta` and the default branch |
+| `squash-merges` | public | The default branch only takes squash merges, through a pull request |
+| `pull-requests` | listed in `org.toml` | Main branches need one code owner approval |
+
+Merge methods can only be limited per target branch.
+Only the default branch is limited to squash, so `develop` can still be merged into `master` with its history.
 Private repos on the free plan cannot have rulesets and are reported.
 
 ### branches

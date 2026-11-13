@@ -31,6 +31,15 @@ visibility = "public"
 exclude = [".github", "API", "Frontend", "Firmware"]
 remove = ["CODEOWNERS", "docs/CODEOWNERS"]
 
+# Only repos that already use Renovate are kept in step, it is never added to a repo.
+# The shared file just extends the presets in renovate/.
+# A repo with needs of its own gets its whole file from templates/renovate/repos/<Repo>/renovate.json.
+[[files.managed]]
+path = "renovate.json"
+template = "templates/renovate/shared/renovate.json"
+overrides = "templates/renovate/repos"
+only_existing = true
+
 # --- community health files ---
 # Report-only unless stated otherwise. `files` and `any_of` are regexes matched against the whole path.
 
@@ -139,11 +148,35 @@ PackageProjectUrl = "https://openshock.org"
 # PackageLicenseExpression = "AGPL-3.0-or-later"
 
 # --- repository rulesets, matched by name ---
-# Rulesets that are not listed here are reported but never deleted.
-# Planned: let org-sync delete or rewrite the unmanaged ones.
+# rulesets/shared/        rulesets used by many repos, assigned below.
+# rulesets/repos/<Repo>/  rulesets for that one repo, picked up automatically.
+#                         A ruleset there whose `name` field equals a shared one's replaces it for that repo.
+# `python -m orgsync import-rulesets` copies rulesets that exist on GitHub but not here into rulesets/repos/.
+
+[rulesets]
+# Rulesets on GitHub with no file here are deleted, so the files are the only source of truth.
+# Set to false to only report them.
+prune = true
 
 [[rulesets.managed]]
-file = "rulesets/main-branches.json"
+file = "rulesets/shared/main-branches.json"
+
+# The default branch only takes squash merges, through a pull request.
+# Other main branches are left out so develop can still be merged into master with its history.
+# The maintainer team and repo admins can bypass it, and so can Renovate when it merges its own pull requests.
+[[rulesets.managed]]
+file = "rulesets/shared/squash-merges.json"
+visibility = "public"
+
+# On top of that: changes need one approval from a code owner.
+# Same bypass list, so Renovate merges non-major updates once CI passes.
+[[rulesets.managed]]
+file = "rulesets/shared/pull-requests.json"
+include = ["API", "Awesome", "Desktop", "Firmware", "Frontend"]
+
+# Firmware's release workflow writes to its release branches through the openshock-release-bot app.
+[rulesets.managed.extra_bypass]
+Firmware = [{ actor_id = 4141223, actor_type = "Integration", bypass_mode = "always" }]
 
 # --- repository settings ---
 

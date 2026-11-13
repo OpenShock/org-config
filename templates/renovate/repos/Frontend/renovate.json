@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>OpenShock/org-config//renovate/default", "local>OpenShock/org-config//renovate/automerge"],
+  "packageRules": [
+    {
+      "description": "Node, pnpm and the base image are bumped together by .github/workflows/update-toolchain.yml",
+      "matchFileNames": [".nvmrc", "Dockerfile", "package.json"],
+      "matchDepNames": ["node", "pnpm"],
+      "enabled": false
+    }
+  ]
+}
