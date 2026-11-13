@@ -1,0 +1,198 @@
+# Desired state for every repo in the org.
+# `python -m orgsync plan` shows where reality differs, `apply` fixes it.
+# Archived repos, forks and empty repos are always ignored.
+
+org = "OpenShock"
+# `apply` refuses to run as anyone else.
+bot_account = "hhvrc"
+# Repos no check should ever touch.
+exclude = []
+
+# Any section below also accepts `include`, `exclude` and `visibility = "public" | "private"`.
+
+# --- managed files: copied verbatim from a template, {org} and {repo} are substituted ---
+
+[[files.managed]]
+path = "SECURITY.md"
+template = "templates/SECURITY.md"
+visibility = "public"
+# .github holds the full policy every stub links to.
+# API, Frontend and Firmware carry hand-written files with component-specific scope.
+exclude = [".github", "API", "Frontend", "Firmware"]
+# Other locations GitHub also reads, removed so there is exactly one copy.
+remove = [".github/SECURITY.md", "docs/SECURITY.md"]
+
+# --- community health files ---
+# Report-only unless stated otherwise. `files` and `any_of` are regexes matched against the whole path.
+
+# The hand-written security policies must keep the shared reporting block.
+# The numbers live in four places: the org policy, templates/SECURITY.md and these three files.
+[[community.must_contain]]
+name = "shared reporting block"
+include = ["API", "Frontend", "Firmware"]
+files = ["SECURITY\\.md"]
+missing = "report"
+contains = [
+    "https://github.com/{org}/.github/blob/main/SECURITY.md",
+    "https://github.com/{org}/{repo}/security/advisories/new",
+    "security@openshock.org",
+    "within 3 working days (7 days at most)",
+    "triage result within 14 days",
+    "default deadline of 90 days",
+]
+
+# A local CONTRIBUTING.md replaces the org one entirely, so it has to link back.
+[[community.must_contain]]
+name = "link to the org contributing guide and the security notice"
+visibility = "public"
+exclude = [".github"]
+files = ["(\\.github/|docs/)?CONTRIBUTING\\.md"]
+contains = ["https://github.com/{org}/.github/blob/main/CONTRIBUTING.md", "SECURITY"]
+
+# The policy must be discoverable from the README, not only from the Security tab.
+[[community.must_contain]]
+name = "README link to the security policy"
+visibility = "public"
+exclude = [".github"]
+files = ["(?i)readme\\.md"]
+contains = ["SECURITY.md"]
+
+# security@ is the security contact, admin@ stays for code of conduct and privacy matters.
+[[community.must_not_contain]]
+reason = "admin@openshock.org used as a security contact, should be security@openshock.org"
+visibility = "public"
+files = ["(\\.github/|docs/)?SECURITY\\.md", "\\.github/ISSUE_TEMPLATE/.*"]
+pattern = "admin@openshock\\.org"
+
+[[community.must_not_contain]]
+reason = "admin@openshock.org used as a security contact, should be security@openshock.org"
+visibility = "public"
+files = ["(?i)readme\\.md", "(\\.github/|docs/)?CONTRIBUTING\\.md"]
+pattern = "(secur|vulnerab).*admin@openshock\\.org|admin@openshock\\.org.*(secur|vulnerab)"
+
+# Inherited from the .github repo, a local copy shadows the org version and drifts.
+[[community.forbidden_files]]
+reason = "inherited from the .github repo"
+exclude = [".github"]
+files = ["(\\.github/|docs/)?(CODE_OF_CONDUCT|SUPPORT)\\.md", "\\.github/VULNERABILITY_REPORT\\.ya?ml"]
+# Set to true to open PRs that remove them instead of reporting them.
+delete = false
+
+# Not inheritable, every repo needs its own.
+[[community.required_files]]
+name = "CODEOWNERS"
+visibility = "public"
+any_of = ["(\\.github/|docs/)?CODEOWNERS"]
+
+# A repo with its own issue templates inherits none of the org ones, including the security contact link.
+[community.issue_templates]
+enabled = true
+visibility = "public"
+exclude = [".github"]
+# Creates config.yml when there is none. An existing one without the link is only reported.
+create_missing = true
+
+# --- GitHub Actions ---
+
+[actions]
+# Every `uses:` is pinned to the commit SHA of the newest release, the same one in every repo.
+# Releases younger than this are not adopted yet.
+min_release_age_days = 7
+# Anything from these owners is fine.
+allowed_owners = ["actions", "github", "docker", "OpenShock"]
+# Individually approved third-party actions.
+allowed = [
+    "NuGet/login",
+    "pnpm/action-setup",
+    "gradle/actions",
+    "pypa/gh-action-pypi-publish",
+    "espressif/install-esp-idf-action",
+    "flipperdevices/flipperzero-ufbt-action",
+]
+# Banned actions that have a rewriter are replaced automatically, the rest are reported.
+rewrite_banned = true
+
+[actions.banned]
+"softprops/action-gh-release" = "use `gh release create`"
+"robinraju/release-downloader" = "use OpenShock/actions/release-download"
+"peter-evans/repository-dispatch" = "use OpenShock/actions/repository-dispatch"
+"peter-evans/create-pull-request" = "use OpenShock/actions/open-pr-from-diff"
+"oprypin/find-latest-tag" = "use OpenShock/actions/find-latest-tag"
+"joncloud/makensis-action" = "use OpenShock/actions/nsis-build"
+"stefanzweifel/git-auto-commit-action" = "use OpenShock/actions/auto-commit"
+
+# Hold an action at a specific tag instead of its newest release.
+[actions.pin]
+# "actions/checkout" = "v7.0.1"
+
+# --- dependabot.yml: generated from the manifests found in each repo ---
+
+[dependabot]
+ecosystems = ["nuget", "npm", "uv", "pip", "gomod", "cargo", "gradle", "docker", "github-actions"]
+# Also available: "dotnet-sdk" (global.json) and "gitsubmodule".
+# Days a new release must exist before dependabot proposes it, 0 leaves the key out.
+cooldown_days = 0
+
+# One weekday per theme, repos within a day are spaced two hours apart from 06:00.
+# Repos not listed get a stable slot derived from their name.
+[dependabot.schedule]
+monday = ["Firmware", "API", "Frontend", "OpenShock.org", "RepositoryServer"]
+tuesday = ["Internal.Net", "LocalRelay", "MinimalEvents", "DiscordBot", "DiscordManagerBot", "Sentry"]
+wednesday = ["infra", "Desktop", "Desktop-Modules", "VROverlay", "ShockOSC"]
+thursday = ["Integrations.LethalCompany", "Integrations.Minecraft", "Integrations.RiskOfRain2", "Integrations.Twitch", "Interception", "Medal"]
+friday = ["Hardware", "FlipperZero", "RFCat-Scripts", "3DPrints"]
+saturday = ["Wiki", "Awesome", ".github", "Bruno", "cicd-playground", "actions"]
+sunday = ["SDK.CSharp", "SDK.Python", "svelte-core", "flatbuffers-schemas", "release-tool", "kubernetes-cluster-gitops", "kubernetes-core-gitops", "DummyHub"]
+
+# Per-repo exceptions.
+# [dependabot.repos."Firmware"]
+# skip = true                         leave the file alone
+# force = true                        regenerate even if it has hand-written keys
+# ecosystems = ["pip", "npm"]         replace the detected list
+# directories = { npm = ["/frontend"] }   replace the detected directories of one ecosystem
+
+# --- Directory.Build.props: these properties are set, everything else is left alone ---
+
+[msbuild.properties]
+Company = "OpenShock"
+Authors = "OpenShock"
+RepositoryUrl = "https://github.com/{org}/{repo}"
+RepositoryType = "git"
+PackageProjectUrl = "https://openshock.org"
+# PackageLicenseExpression = "AGPL-3.0-or-later"
+
+# --- repository rulesets, matched by name ---
+# Rulesets that are not listed here are reported but never deleted.
+
+[[rulesets.managed]]
+file = "rulesets/main-branches.json"
+
+# --- repository settings ---
+
+[settings.all]
+# delete_branch_on_merge = true
+# Careful: on private repos the free plan has no rulesets, so nothing would stop this
+# from deleting `develop` after a develop -> master PR.
+# Also possible: allow_squash_merge, allow_merge_commit, allow_rebase_merge, allow_auto_merge, allow_update_branch.
+
+[settings.public]
+secret_scanning = true
+secret_scanning_push_protection = true
+vulnerability_alerts = true
+# SECURITY.md points reporters at this.
+private_vulnerability_reporting = true
+
+[settings.private]
+vulnerability_alerts = true
+
+# --- orphaned branches ---
+# Destructive: planned on every run, but only applied with `apply --check branches`.
+
+[branches]
+prefixes = ["feat/", "feature/", "fix/", "bugfix/", "hotfix/", "chore/", "docs/", "refactor/", "test/", "ci/", "build/", "perf/", "dependabot/"]
+# Never deleted, on top of each repo's default branch.
+protected = ["master", "main", "develop", "beta"]
+# Unmerged branches older than this are reported.
+stale_days = 90
+# Set to true to delete them instead of reporting them.
+delete_stale_unmerged = false
