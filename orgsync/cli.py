@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor
 from . import gh
 from .apply import apply
 from .checks import BY_NAME, CHECKS, Check, run
-from .checks.actions import Resolver
 from .config import Config
 from .model import Repo, Result, list_repos, load_tree
 
@@ -26,14 +25,13 @@ def build_plan(cfg: Config, checks: list[Check], only: list[str], skip: list[str
         repos = [r for r in repos if r.name.lower() in wanted]
     skipped = {r.lower() for r in skip}
     repos = [r for r in repos if r.name.lower() not in skipped]
-    resolver = Resolver(cfg.section('actions'))
 
     def examine(repo: Repo) -> list[tuple[Check, Result]]:
         load_tree(repo)
         results = []
         for check in checks:
             try:
-                result = run(check.name, repo, cfg, resolver)
+                result = run(check.name, repo, cfg)
             except gh.GhError as e:
                 result = Result(notes=[f'check failed: {e.message}'])
             if repo.truncated:
@@ -105,27 +103,24 @@ def main(argv: list[str] | None = None) -> int:
     held_back = [c.name for c in checks if c.destructive and c.name not in args.check]
     if held_back:
         print(f'not applying {", ".join(held_back)}: destructive, name it with --check to apply')
-    todo = [(repo, check, result) for repo, results in plan for check, result in results
-            if result.drift and check.name not in held_back]
-    if not todo:
-        print('nothing to apply')
-        return 0
+    todo = [(repo, [(c, r) for c, r in results if r.drift and c.name not in held_back]) for repo, results in plan]
+    todo = [(repo, results) for repo, results in todo if results]
     login = gh.current_login()
     if cfg.bot_account and login != cfg.bot_account:
         print(f'gh is logged in as {login}, expected {cfg.bot_account}: run `gh auth switch -u {cfg.bot_account}` first')
         return 2
     if not args.yes:
-        mode = 'direct commits to default branches' if args.direct else 'pull requests'
-        answer = input(f'apply to {len({r.name for r, _, _ in todo})} repo(s) as {login}, file changes as {mode}? [y/N] ')
+        mode = 'one direct commit per repo' if args.direct else 'one pull request per repo'
+        answer = input(f'apply to {len(todo)} repo(s) as {login}, file changes as {mode}? [y/N] ')
         if answer.strip().lower() != 'y':
             print('aborted')
             return 1
 
     failed = False
-    for repo, check, result in todo:
-        for line in apply(repo, check, result, args.direct):
+    for repo, results in todo:
+        for line in apply(repo, results, args.direct):
             failed |= line.startswith('FAILED')
-            print(f'{repo.name} [{check.name}] {line}')
+            print(f'{repo.name}: {line}')
     return 1 if failed else 0
 
 

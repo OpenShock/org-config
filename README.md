@@ -13,9 +13,9 @@ pip install pyyaml            # the only dependency, besides gh
 
 python -m orgsync plan                      # read-only: show all drift
 python -m orgsync plan --diff --only API    # with file diffs, one repo
-python -m orgsync plan --check actions      # one check
+python -m orgsync plan --check rulesets     # one check
 
-python -m orgsync apply                     # open PRs and apply settings
+python -m orgsync apply                     # one PR per repo, plus settings and rulesets
 python -m orgsync apply --direct            # commit to default branches instead of opening PRs
 python -m orgsync apply --check branches    # delete orphaned branches
 ```
@@ -39,15 +39,14 @@ All of them are configured in [`org.toml`](org.toml).
 | --- | --- | --- |
 | `files` | Managed files such as `SECURITY.md`, copied from `templates/` | PR |
 | `community` | Rules about community files: required, forbidden, must contain, must not contain; issue template security link | Notes, PR for a missing issue template `config.yml` |
-| `actions` | Every `uses:` pinned to the SHA of the same release org-wide, an allowlist, banned actions | PR |
-| `dependabot` | `.github/dependabot.yml`, generated from the manifests found in the repo | PR |
+| `actions` | An allowlist of actions, and banned actions | Notes, PR for a rewritten banned action |
 | `msbuild` | Selected properties in `Directory.Build.props` | PR |
 | `rulesets` | Repository rulesets from `rulesets/*.json` | API |
 | `settings` | Merge policy and security features | API |
 | `branches` | Deletes orphaned `feat/`, `fix/`, `chore/`, ... branches | API, only with `--check branches` |
 
-Each check that changes files uses its own branch, `chore/org-sync-<check>`, and its own PR.
-Running `apply` again while a PR is open adds a commit to it instead of opening a second one.
+All file changes for a repo arrive together: one commit on the `chore/org-sync` branch and one PR per repo, with the description grouped by check.
+Running `apply` again while that PR is open adds a commit to it instead of opening a second one.
 
 Lines starting with `!` in the plan are notes: things the tool noticed but will not change on its own.
 
@@ -59,18 +58,11 @@ A repo-level `SECURITY.md` replaces the org default entirely, so the stub never 
 
 ### actions
 
-The version every repo should use is the newest release that is at least `min_release_age_days` old.
-A repo that is already ahead of that is never downgraded.
-A SHA that does not match the tag in its comment is corrected.
-
-Banned actions are reported.
+Actions that are neither from an allowed owner nor individually allowed are reported, and so are banned ones.
 `softprops/action-gh-release` is also rewritten into a `gh release create` step when the tool understands every input of the step, and left for a human otherwise.
 The rewritten step is stricter than the action in two ways: it fails if the release already exists, and it fails if a file pattern matches nothing.
 
-### dependabot
-
-The file is generated, so local edits are overwritten.
-A file with keys the generator does not produce (`ignore`, `registries`, ...) is left alone and reported until the repo gets `force` or `skip` in `org.toml`.
+Action versions and SHA pins are not touched, see below.
 
 ### rulesets
 
@@ -92,6 +84,12 @@ A branch is a candidate only if its name starts with one of the configured prefi
 | Unmerged work, recent | kept |
 
 The plan prints the commit each branch pointed at, so a deleted branch can be recreated.
+
+## What this does not do
+
+Dependency updates belong to [Renovate](https://docs.renovatebot.com), which is installed on the org.
+That covers package versions, GitHub Actions versions and their SHA pins, and Docker image tags.
+org-sync does not generate `dependabot.yml`, does not bump or pin actions, and leaves `renovate.json` alone.
 
 ## Adding a check
 

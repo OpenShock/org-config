@@ -1,50 +1,10 @@
 import datetime
 import unittest
 
-from orgsync.checks import actions, branches, community, dependabot, msbuild, rulesets
+from orgsync import apply
+from orgsync.checks import BY_NAME, actions, branches, community, msbuild, rulesets
 
 NOW = datetime.datetime(2026, 11, 13, tzinfo=datetime.UTC)
-
-
-class FakeResolver:
-    def latest(self, repo):
-        return {'actions/checkout': 'v7.0.1'}.get(repo)
-
-    def sha(self, repo, tag):
-        return {'v7.0.1': 'a' * 40, 'v9.0.0': 'c' * 40}.get(tag)
-
-
-class PinLine(unittest.TestCase):
-
-    def pin(self, line):
-        log, problems = [], []
-        return actions.pin_line(line, FakeResolver(), log, problems), log, problems
-
-    def test_floating_tag_is_pinned(self):
-        out, log, _ = self.pin('      - uses: actions/checkout@v7')
-        self.assertEqual(out, f'      - uses: actions/checkout@{"a" * 40} # v7.0.1')
-        self.assertIn('v7 -> v7.0.1', log[0])
-
-    def test_wrong_sha_is_corrected(self):
-        out, log, _ = self.pin(f'        uses: actions/checkout@{"b" * 40} # v7.0.1')
-        self.assertIn('a' * 40, out)
-        self.assertIn('corrected', log[0])
-
-    def test_correct_line_is_untouched(self):
-        line = f'        uses: actions/checkout@{"a" * 40}  # v7.0.1'
-        self.assertEqual(self.pin(line), (line, [], []))
-
-    def test_never_downgrades(self):
-        out, _, _ = self.pin(f'        uses: actions/checkout@{"c" * 40} # v9.0.0')
-        self.assertTrue(out.endswith('# v9.0.0'))
-
-    def test_local_and_docker_are_skipped(self):
-        for line in ('      - uses: ./.github/actions/x', '      - uses: docker://alpine@sha256:abc'):
-            self.assertEqual(self.pin(line)[0], line)
-
-    def test_sha_without_comment_is_reported(self):
-        _, _, problems = self.pin(f'      - uses: some/thing@{"d" * 40}')
-        self.assertEqual(len(problems), 1)
 
 
 WORKFLOW = '''jobs:
@@ -87,39 +47,6 @@ class RewriteBanned(unittest.TestCase):
         self.assertEqual(actions.rewrite_banned(text, []), text)
 
 
-class Dependabot(unittest.TestCase):
-
-    def test_detect(self):
-        tree = ['App.sln', 'src/App/App.csproj', 'docker/Dockerfile', 'web/package.json', 'web/sub/package.json',
-                'web/node_modules/x/package.json', '.github/workflows/ci.yml', '.github/actions/build/action.yml']
-        self.assertEqual(dependabot.detect(tree, dependabot.ORDER), {
-            'nuget': ['/'], 'npm': ['/web'], 'docker': ['/docker'],
-            'github-actions': ['/', '/.github/actions/build'],
-        })
-
-    def test_uv_replaces_pip(self):
-        found = dependabot.detect(['pyproject.toml', 'uv.lock'], dependabot.ORDER)
-        self.assertEqual(found, {'uv': ['/']})
-
-    def test_render_is_valid_and_stable(self):
-        import yaml
-        text = dependabot.render('Org', {'nuget': ['/'], 'github-actions': ['/', '/a']}, 'monday', '08:00', 7)
-        data = yaml.safe_load(text)
-        self.assertEqual([u['package-ecosystem'] for u in data['updates']], ['nuget', 'github-actions'])
-        self.assertEqual(data['updates'][1]['directories'], ['/', '/a'])
-        self.assertEqual(data['updates'][0]['cooldown'], {'default-days': 7})
-        self.assertEqual(dependabot.custom_keys(text), [])
-
-    def test_custom_keys(self):
-        text = 'version: 2\nregistries: {}\nupdates:\n  - package-ecosystem: npm\n    directory: /\n    ignore: []\n'
-        self.assertEqual(dependabot.custom_keys(text), ['ignore', 'registries'])
-
-    def test_schedule(self):
-        section = {'schedule': {'monday': ['A', 'B']}}
-        self.assertEqual(dependabot.schedule_for('b', section), ('monday', '08:00'))
-        self.assertEqual(dependabot.schedule_for('Other', section), dependabot.schedule_for('other', section))
-
-
 PROPS = '''<Project>
     <PropertyGroup>
         <Company>Other</Company>
@@ -154,6 +81,19 @@ class Rulesets(unittest.TestCase):
         self.assertEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
         live['rules'].append({'type': 'non_fast_forward'})
         self.assertNotEqual(rulesets.normalize(live, like=desired), rulesets.normalize(desired))
+
+
+class Merge(unittest.TestCase):
+
+    def test_one_change_set_per_repo(self):
+        from orgsync.model import Result
+        files, body = apply.merge([
+            (BY_NAME['files'], Result(files={'SECURITY.md': 'x'}, details=['add `SECURITY.md`'])),
+            (BY_NAME['rulesets'], Result(details=['ignored, no files'])),
+            (BY_NAME['community'], Result(files={'CODE_OF_CONDUCT.md': None}, details=['remove it'])),
+        ])
+        self.assertEqual(files, {'SECURITY.md': 'x', 'CODE_OF_CONDUCT.md': None})
+        self.assertEqual(body, '### files\n- add `SECURITY.md`\n\n### community\n- remove it')
 
 
 class Community(unittest.TestCase):

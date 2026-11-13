@@ -104,9 +104,7 @@ create_missing = true
 # --- GitHub Actions ---
 
 [actions]
-# Every `uses:` is pinned to the commit SHA of the newest release, the same one in every repo.
-# Releases younger than this are not adopted yet.
-min_release_age_days = 7
+# Versions and SHA pins are kept current by Renovate, this only decides which actions may be used.
 # Anything from these owners is fine.
 allowed_owners = ["actions", "github", "docker", "OpenShock"]
 # Individually approved third-party actions.
@@ -129,36 +127,6 @@ rewrite_banned = true
 "oprypin/find-latest-tag" = "use OpenShock/actions/find-latest-tag"
 "joncloud/makensis-action" = "use OpenShock/actions/nsis-build"
 "stefanzweifel/git-auto-commit-action" = "use OpenShock/actions/auto-commit"
-
-# Hold an action at a specific tag instead of its newest release.
-[actions.pin]
-# "actions/checkout" = "v7.0.1"
-
-# --- dependabot.yml: generated from the manifests found in each repo ---
-
-[dependabot]
-ecosystems = ["nuget", "npm", "uv", "pip", "gomod", "cargo", "gradle", "docker", "github-actions"]
-# Also available: "dotnet-sdk" (global.json) and "gitsubmodule".
-# Days a new release must exist before dependabot proposes it, 0 leaves the key out.
-cooldown_days = 0
-
-# One weekday per theme, repos within a day are spaced two hours apart from 06:00.
-# Repos not listed get a stable slot derived from their name.
-[dependabot.schedule]
-monday = ["Firmware", "API", "Frontend", "OpenShock.org", "RepositoryServer"]
-tuesday = ["Internal.Net", "LocalRelay", "MinimalEvents", "DiscordBot", "DiscordManagerBot", "Sentry"]
-wednesday = ["infra", "Desktop", "Desktop-Modules", "VROverlay", "ShockOSC"]
-thursday = ["Integrations.LethalCompany", "Integrations.Minecraft", "Integrations.RiskOfRain2", "Integrations.Twitch", "Interception", "Medal"]
-friday = ["Hardware", "FlipperZero", "RFCat-Scripts", "3DPrints"]
-saturday = ["Wiki", "Awesome", ".github", "Bruno", "cicd-playground", "actions"]
-sunday = ["SDK.CSharp", "SDK.Python", "svelte-core", "flatbuffers-schemas", "release-tool", "kubernetes-cluster-gitops", "kubernetes-core-gitops", "DummyHub"]
-
-# Per-repo exceptions.
-# [dependabot.repos."Firmware"]
-# skip = true                         leave the file alone
-# force = true                        regenerate even if it has hand-written keys
-# ecosystems = ["pip", "npm"]         replace the detected list
-# directories = { npm = ["/frontend"] }   replace the detected directories of one ecosystem
 
 # --- Directory.Build.props: these properties are set, everything else is left alone ---
 

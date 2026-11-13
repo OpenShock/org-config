@@ -1,11 +1,12 @@
-"""GitHub Actions: one pinned version per action org-wide, an allowlist, and banned-action removal."""
+"""GitHub Actions: an allowlist and banned-action removal.
 
-import datetime
+Versions and SHA pins are left to Renovate.
+"""
+
 import re
 
 import yaml
 
-from .. import gh
 from ..config import Config, applies
 from ..model import Repo, Result, join_lines, split_lines
 
@@ -14,8 +15,6 @@ WORKFLOW_FILES = r'^\.github/workflows/[^/]+\.ya?ml$|(^|/)action\.ya?ml$'
 USES_RE = re.compile(
     r'^(?P<pre>\s*(?:-\s+)?uses:\s*)(?P<q>[\'"]?)(?P<action>[^@\s\'"]+)@(?P<ref>[^\s\'"#]+)(?P=q)(?P<rest>.*)$'
 )
-SHA_RE = re.compile(r'^[0-9a-f]{40}$')
-VERSION_RE = re.compile(r'^v?(\d+(?:\.\d+)*)$')
 
 
 def action_repo(action: str) -> str:
@@ -25,97 +24,6 @@ def action_repo(action: str) -> str:
 
 def is_external(action: str) -> bool:
     return not action.startswith(('./', 'docker://'))
-
-
-def parse_version(tag: str | None) -> tuple[int, ...] | None:
-    m = VERSION_RE.match(tag or '')
-    return tuple(int(p) for p in m[1].split('.')) if m else None
-
-
-class Resolver:
-    """Decides the one version every repo should use for an action, and its commit SHA."""
-
-    def __init__(self, cfg: dict, now: datetime.datetime | None = None):
-        self.pins: dict[str, str] = cfg.get('pin', {})
-        self.cutoff = (now or datetime.datetime.now(datetime.UTC)) - datetime.timedelta(days=cfg.get('min_release_age_days', 0))
-        self._latest: dict[str, str | None] = {}
-        self._sha: dict[tuple[str, str], str | None] = {}
-
-    def latest(self, repo: str) -> str | None:
-        if repo in self.pins:
-            return self.pins[repo]
-        if repo not in self._latest:
-            self._latest[repo] = self._fetch_latest(repo)
-        return self._latest[repo]
-
-    def _fetch_latest(self, repo: str) -> str | None:
-        try:
-            releases = gh.api(f'repos/{repo}/releases?per_page=50')
-        except gh.GhError:
-            return None
-        best = None
-        for rel in releases:
-            version = parse_version(rel['tag_name'])
-            # Skips things like codeql-bundle-* tags and releases still inside the cooldown.
-            if version is None or rel['draft'] or rel['prerelease'] or not rel['published_at']:
-                continue
-            if datetime.datetime.fromisoformat(rel['published_at']) > self.cutoff:
-                continue
-            if best is None or version > best[0]:
-                best = (version, rel['tag_name'])
-        if best or releases:
-            return best[1] if best else None
-        # No releases at all: fall back to plain tags, which carry no date to apply the cooldown to.
-        try:
-            tags = [t['name'] for t in gh.api(f'repos/{repo}/tags?per_page=100')]
-        except gh.GhError:
-            return None
-        versions = [(parse_version(t), t) for t in tags if parse_version(t)]
-        return max(versions)[1] if versions else None
-
-    def sha(self, repo: str, tag: str) -> str | None:
-        key = (repo, tag)
-        if key not in self._sha:
-            try:
-                self._sha[key] = gh.api(f'repos/{repo}/commits/{tag}')['sha']
-            except gh.GhError:
-                self._sha[key] = None
-        return self._sha[key]
-
-
-def pin_line(line: str, resolver: Resolver, log: list[str], problems: list[str]) -> str:
-    m = USES_RE.match(line)
-    if m is None or not is_external(m['action']):
-        return line
-    action, ref = m['action'], m['ref']
-    repo = action_repo(action)
-    comment = re.search(r'#\s*(\S+)', m['rest'])
-    current = (comment[1] if comment else None) if SHA_RE.match(ref) else ref
-    target = resolver.latest(repo)
-    current_version, target_version = parse_version(current), parse_version(target)
-    # Never downgrade: a repo may already be ahead of the cooldown window.
-    if target is None or (current_version and target_version and current_version > target_version):
-        target = current
-    if target is None:
-        problems.append(f'`{action}` is pinned to a SHA with no version comment, cannot tell what it is')
-        return line
-    sha = resolver.sha(repo, target)
-    if sha is None:
-        problems.append(f'`{action}@{target}` does not resolve to a commit')
-        return line
-    updated = f'{m["pre"]}{action}@{sha} # {target}'
-    if ref == sha and current == target:
-        # Already correct, leave spacing and any trailing comment untouched.
-        return line
-    if updated != line:
-        if current != target:
-            major = current_version and target_version and current_version[0] != target_version[0]
-            log.append(f'`{action}` {current or ref[:7]} -> {target}{" (major)" if major else ""}')
-        elif not SHA_RE.match(ref):
-            log.append(f'`{action}` pinned to the SHA of {target}')
-        elif ref != sha:
-            log.append(f'`{action}` SHA did not match {target}, corrected')
-    return updated
 
 
 # --- banned action rewriting ---
@@ -234,7 +142,7 @@ def rewrite_banned(text: str, log: list[str]) -> str:
     return join_lines(lines, newline, trailing)
 
 
-def check(repo: Repo, cfg: Config, resolver: Resolver) -> Result:
+def check(repo: Repo, cfg: Config) -> Result:
     section = cfg.section('actions')
     result = Result()
     if not applies(repo, section):
@@ -251,19 +159,14 @@ def check(repo: Repo, cfg: Config, resolver: Resolver) -> Result:
         if original is None:
             continue
         log: list[str] = []
-        problems: list[str] = []
         text = rewrite_banned(original, log) if section.get('rewrite_banned', True) else original
-        lines, newline, trailing = split_lines(text)
-        for line in lines:
+        for line in text.splitlines():
             m = USES_RE.match(line)
             if m and is_external(m['action']):
                 seen.setdefault(action_repo(m['action']), path)
-        lines = [pin_line(line, resolver, log, problems) for line in lines]
-        text = join_lines(lines, newline, trailing)
         if text != original:
             result.files[path] = text
-        result.details += [f'{path}: {entry}' for entry in dict.fromkeys(log)]
-        result.notes += [f'{path}: {entry}' for entry in dict.fromkeys(problems)]
+        result.details += [f'{path}: {entry}' for entry in log]
 
     for action, path in sorted(seen.items()):
         key = action.lower()
