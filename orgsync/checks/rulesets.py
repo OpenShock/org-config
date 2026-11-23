@@ -91,7 +91,7 @@ def import_missing(repo: Repo, cfg: Config) -> list[str]:
         path = cfg.path(f'rulesets/repos/{repo.name}/{slug(name)}.json')
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(content, indent=2) + '\n', encoding='utf-8')
-        written.append(str(path.relative_to(cfg.root)))
+        written.append(path.relative_to(cfg.root).as_posix())
     return written
 
 

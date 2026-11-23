@@ -19,6 +19,10 @@ MIN_BUDGET = 1000
 Plan = list[tuple[Repo, list[tuple[Check, Result]]]]
 
 
+def _describe(error: Exception) -> str:
+    return error.message if isinstance(error, gh.GhError) else f'{type(error).__name__}: {error}'
+
+
 def build_plan(cfg: Config, checks: list[Check], only: list[str], skip: list[str], jobs: int) -> Plan:
     everything = list_repos(cfg.org)
     unknown = cfg.unknown_repos([r.name for r in everything])
@@ -32,13 +36,17 @@ def build_plan(cfg: Config, checks: list[Check], only: list[str], skip: list[str
     repos = [r for r in repos if r.name.lower() not in skipped]
 
     def examine(repo: Repo) -> list[tuple[Check, Result]]:
-        load_tree(repo)
+        # One repo that cannot be read or checked must not take the whole run down with it.
+        try:
+            load_tree(repo)
+        except Exception as e:
+            return [(checks[0], Result(notes=[f'could not read the file tree, nothing was checked: {_describe(e)}']))]
         results = []
         for check in checks:
             try:
                 result = run(check.name, repo, cfg)
-            except gh.GhError as e:
-                result = Result(notes=[f'check failed: {e.message}'])
+            except Exception as e:
+                result = Result(notes=[f'check failed: {_describe(e)}'])
             if repo.truncated:
                 result.notes.append('file tree was truncated by GitHub, results may be incomplete')
             results.append((check, result))
@@ -119,19 +127,20 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as e:
         print(f'refusing to run, {e}')
         return 2
-    changes, _ = print_plan(plan, args.diff)
+    print_plan(plan, args.diff)
     after = gh.rate_limits()
     print('API budget: ' + ', '.join(
         f'{name} used {max(0, before[name]["remaining"] - after[name]["remaining"])}, {after[name]["remaining"]} of {after[name]["limit"]} left'
         for name in ('core', 'graphql')))
-    if args.command == 'plan':
-        return 1 if changes else 0
-
+    # Destructive checks only count, and are only applied, when named with --check.
     held_back = [c.name for c in checks if c.destructive and c.name not in args.check]
-    if held_back:
-        print(f'not applying {", ".join(held_back)}: destructive, name it with --check to apply')
     todo = [(repo, [(c, r) for c, r in results if r.drift and c.name not in held_back]) for repo, results in plan]
     todo = [(repo, results) for repo, results in todo if results]
+    if args.command == 'plan':
+        return 1 if todo else 0
+
+    if held_back:
+        print(f'not applying {", ".join(held_back)}: destructive, name it with --check to apply')
     login = gh.current_login()
     if cfg.bot_account and login != cfg.bot_account:
         print(f'gh is logged in as {login}, expected {cfg.bot_account}: run `gh auth switch -u {cfg.bot_account}` first')

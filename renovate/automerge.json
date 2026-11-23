@@ -2,6 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": "Non-major updates merge themselves through a pull request once CI passes",
   "automergeType": "pr",
+  "automergeStrategy": "squash",
   "platformAutomerge": false,
   "lockFileMaintenance": {
     "enabled": true,

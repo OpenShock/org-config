@@ -1,4 +1,7 @@
-"""Thin wrapper around the `gh` CLI, which owns authentication."""
+"""Thin wrapper around the `gh` CLI, which owns authentication.
+
+gh always writes UTF-8, so its output is decoded as such instead of with the console code page.
+"""
 
 import json
 import re
@@ -25,7 +28,7 @@ _last_write = 0.0
 
 def rate_limits() -> dict:
     """Remaining budget per resource. This endpoint does not count against the limit."""
-    out = subprocess.run(['gh', 'api', 'rate_limit'], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(['gh', 'api', 'rate_limit'], capture_output=True, text=True, encoding='utf-8', check=True).stdout
     return json.loads(out)['resources']
 
 
@@ -55,7 +58,7 @@ def _run(args: list[str], stdin: str | None = None, write: bool = False) -> str:
     for attempt in range(MAX_RETRIES + 1):
         if write:
             _pace_write()
-        proc = subprocess.run(['gh', *args], input=stdin, capture_output=True, text=True)
+        proc = subprocess.run(['gh', *args], input=stdin, capture_output=True, text=True, encoding='utf-8')
         if proc.returncode == 0:
             return proc.stdout
         status = re.search(r'\(HTTP (\d+)\)', proc.stderr)

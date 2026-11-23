@@ -48,6 +48,10 @@ class RewriteBanned(unittest.TestCase):
         text = WORKFLOW.replace('draft: true', 'append_body: true')
         self.assertEqual(actions.rewrite_banned(text, []), text)
 
+    def test_recursive_glob_is_left_alone(self):
+        text = WORKFLOW.replace('artifacts/a.zip', 'artifacts/**/a.zip')
+        self.assertEqual(actions.rewrite_banned(text, []), text)
+
     def test_step_with_id_is_left_alone(self):
         text = WORKFLOW.replace('- name: Create release', '- id: rel')
         self.assertEqual(actions.rewrite_banned(text, []), text)

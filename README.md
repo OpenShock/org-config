@@ -21,6 +21,7 @@ python -m orgsync apply --check branches    # delete orphaned branches
 ```
 
 `plan` exits with 1 when there is drift, so it can run on a schedule.
+Branch deletions are always listed, but only count as drift when asked for with `--check branches`.
 `apply` prints the plan first and asks before doing anything.
 It refuses to run unless `gh` is logged in as the `bot_account` from `org.toml`.
 
@@ -122,7 +123,8 @@ The plan prints the commit each branch pointed at, so a deleted branch can be re
 
 Dependency updates belong to [Renovate](https://docs.renovatebot.com), which is installed on the org.
 That covers package versions, GitHub Actions versions and their SHA pins, and Docker image tags.
-org-sync does not generate `dependabot.yml`, does not bump or pin actions, and leaves `renovate.json` alone.
+org-sync does not generate `dependabot.yml` and does not bump or pin actions.
+Its only part in this is keeping existing `renovate.json` files pointed at the shared presets.
 
 ## Adding a check
 

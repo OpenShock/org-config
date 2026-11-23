@@ -57,6 +57,8 @@ def check(repo: Repo, cfg: Config) -> Result:
             text, change = set_property(text, name, value)
             if change:
                 result.details.append(f'{path}: {change}')
+            elif f'<{name}>' not in text:
+                result.notes.append(f'{path}: cannot add {name}, no unconditional <PropertyGroup> with its closing tag on a line of its own')
         if text != original:
             result.files[path] = text
     return result

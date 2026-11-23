@@ -78,7 +78,8 @@ def gh_release_step(step: dict, indent: str) -> list[str] | None:
         args.append('--notes ""')
     files = [f.strip() for f in str(inputs.get('files', '')).splitlines() if f.strip()]
     # Globs are left unquoted for the shell to expand, so only allow harmless characters.
-    if any(not re.fullmatch(r'[A-Za-z0-9_./*?\[\]{},-]+', f) for f in files):
+    # `**` is recursive for the action but not for bash, so that is left for a human too.
+    if any('**' in f or not re.fullmatch(r'[A-Za-z0-9_./*?\[\]{},-]+', f) for f in files):
         return None
     if any('\n' in str(v) for v in env.values()):
         return None
