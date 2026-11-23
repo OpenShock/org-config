@@ -13,13 +13,18 @@ ADVISORY_SUFFIX = '/security/advisories/new'
 CONTACT_LINK = '''contact_links:
   - name: Report a security vulnerability
     url: https://github.com/{org}/{repo}/security/advisories/new
-    about: Never report security vulnerabilities in public issues. Report them privately here, as described in SECURITY.md.
+    about: Never report security vulnerabilities in public issues. Report them privately here, as described in our security policy.
 '''
 
 
 def _matching(repo: Repo, patterns: list[str]) -> list[str]:
     compiled = [re.compile(p) for p in patterns]
     return [path for path in repo.tree if any(rx.fullmatch(path) for rx in compiled)]
+
+
+def _kept(paths: list[str], result: Result) -> list[str]:
+    """Without the files this run removes, their contents no longer matter."""
+    return [p for p in paths if result.files.get(p, '') is not None]
 
 
 def _squash(text: str) -> str:
@@ -89,7 +94,7 @@ def check(repo: Repo, cfg: Config) -> Result:
     for rule in section.get('must_contain', []):
         if not applies(repo, rule):
             continue
-        paths = _matching(repo, rule['files'])
+        paths = _kept(_matching(repo, rule['files']), result)
         if not paths and rule.get('missing', 'ignore') == 'report':
             result.notes.append(f'missing {rule["name"]}')
         repo.load(paths)
@@ -102,7 +107,7 @@ def check(repo: Repo, cfg: Config) -> Result:
         if not applies(repo, rule):
             continue
         pattern = re.compile(rule['pattern'], re.I)
-        paths = _matching(repo, rule['files'])
+        paths = _kept(_matching(repo, rule['files']), result)
         repo.load(paths)
         for path in paths:
             lines = [str(n) for n, line in enumerate((repo.read(path) or '').splitlines(), 1) if pattern.search(line)]

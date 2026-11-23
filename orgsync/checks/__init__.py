@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from . import actions, branches, community, files, msbuild, rulesets, settings
+from . import actions, branches, community, files, msbuild, renovate, rulesets, settings
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class Check:
 # Rulesets come before settings so long-lived branches are protected before merge behaviour changes.
 CHECKS = [
     Check('files'),
+    Check('renovate'),
     Check('community'),
     Check('actions'),
     Check('msbuild'),
@@ -25,6 +26,6 @@ BY_NAME = {c.name: c for c in CHECKS}
 
 
 def run(name: str, repo, cfg):
-    modules = {'files': files, 'community': community, 'actions': actions, 'msbuild': msbuild,
+    modules = {'files': files, 'renovate': renovate, 'community': community, 'actions': actions, 'msbuild': msbuild,
                'rulesets': rulesets, 'settings': settings, 'branches': branches}
     return modules[name].check(repo, cfg)

@@ -12,15 +12,7 @@ exclude = []
 
 # --- managed files: copied verbatim from a template, {org} and {repo} are substituted ---
 
-[[files.managed]]
-path = "SECURITY.md"
-template = "templates/SECURITY.md"
-visibility = "public"
-# .github holds the full policy every stub links to.
-# API, Frontend and Firmware carry hand-written files with component-specific scope.
-exclude = [".github", "API", "Frontend", "Firmware"]
-# Other locations GitHub also reads, removed so there is exactly one copy.
-remove = [".github/SECURITY.md", "docs/SECURITY.md"]
+# SECURITY.md is not managed: every repo inherits the policy in the .github repo, see community.forbidden_files.
 
 # Named users rather than a team: a team is ignored unless it has write access to the repo.
 # The four excluded repos get their CODEOWNERS from the security policy work.
@@ -31,20 +23,24 @@ visibility = "public"
 exclude = [".github", "API", "Frontend", "Firmware"]
 remove = ["CODEOWNERS", "docs/CODEOWNERS"]
 
-# Only repos that already use Renovate are kept in step, it is never added to a repo.
-# The shared file just extends the presets in renovate/.
-# A repo with needs of its own gets its whole file from templates/renovate/repos/<Repo>/renovate.json.
-[[files.managed]]
+# --- renovate.json: every repo owns its rules ---
+# The only thing enforced is that an existing renovate.json extends the shared presets in renovate/.
+# Renovate is never added to a repo, and a file that already extends the presets is never touched.
+# Rules for one repo belong in that repo's own file, after the presets.
+
+[renovate]
 path = "renovate.json"
-template = "templates/renovate/shared/renovate.json"
-overrides = "templates/renovate/repos"
-only_existing = true
+# How Renovate reaches this repo, the preset's path without .json is appended.
+source = "local>{org}/org-config//"
+presets = ["renovate/default.json", "renovate/automerge.json"]
+# A rule that leaves the presets for the one repo that needs it waits in renovate/handover/<Repo>.json
+# until that repo's renovate.json carries it. Delete the file once that is merged, the repo owns the rule from then on.
 
 # --- community health files ---
 # Report-only unless stated otherwise. `files` and `any_of` are regexes matched against the whole path.
 
 # The hand-written security policies must keep the shared reporting block.
-# The numbers live in four places: the org policy, templates/SECURITY.md and these three files.
+# The numbers live in four places: the org policy and these three files.
 [[community.must_contain]]
 name = "shared reporting block"
 include = ["API", "Frontend", "Firmware"]
@@ -68,6 +64,7 @@ files = ["(\\.github/|docs/)?CONTRIBUTING\\.md"]
 contains = ["https://github.com/{org}/.github/blob/main/CONTRIBUTING.md", "SECURITY"]
 
 # The policy must be discoverable from the README, not only from the Security tab.
+# A link to the org policy counts, and so does one to the repo's own file where it has one.
 [[community.must_contain]]
 name = "README link to the security policy"
 visibility = "public"
@@ -94,6 +91,14 @@ reason = "inherited from the .github repo"
 exclude = [".github"]
 files = ["(\\.github/|docs/)?(CODE_OF_CONDUCT|SUPPORT)\\.md", "\\.github/VULNERABILITY_REPORT\\.ya?ml"]
 # Removed through a PR, set to false to only report them.
+delete = true
+
+# The security policy is inherited the same way, so a local copy would replace the whole org policy.
+# API, Frontend and Firmware carry hand-written files with component-specific scope.
+[[community.forbidden_files]]
+reason = "the security policy is inherited from the .github repo"
+exclude = [".github", "API", "Frontend", "Firmware"]
+files = ["(\\.github/|docs/)?SECURITY\\.md"]
 delete = true
 
 # Not inheritable, every repo needs its own.
@@ -190,7 +195,7 @@ Firmware = [{ actor_id = 4141223, actor_type = "Integration", bypass_mode = "alw
 secret_scanning = true
 secret_scanning_push_protection = true
 vulnerability_alerts = true
-# SECURITY.md points reporters at this.
+# The security policy points reporters at this.
 private_vulnerability_reporting = true
 
 [settings.private]

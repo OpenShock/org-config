@@ -38,7 +38,8 @@ All of them are configured in [`org.toml`](org.toml).
 
 | Check | Keeps even | How it is applied |
 | --- | --- | --- |
-| `files` | Managed files such as `SECURITY.md` and `renovate.json`, copied from `templates/` | PR |
+| `files` | Managed files such as `CODEOWNERS`, copied from `templates/` | PR |
+| `renovate` | An existing `renovate.json` extends the shared presets | PR |
 | `community` | Rules about community files: required, forbidden, must contain, must not contain; issue template security link | Notes, PR for a missing issue template `config.yml` |
 | `actions` | An allowlist of actions, and banned actions | Notes, PR for a rewritten banned action |
 | `msbuild` | Selected properties in `Directory.Build.props` | PR |
@@ -53,20 +54,24 @@ Lines starting with `!` in the plan are notes: things the tool noticed but will 
 
 ### files and community
 
-`SECURITY.md` is a short stub that links to the full policy in the `.github` repo.
-A repo-level `SECURITY.md` replaces the org default entirely, so the stub never restates scope or rules that could drift.
-`.github`, `API`, `Frontend` and `Firmware` are excluded because they carry hand-written policies; the `community` check verifies those still contain the shared reporting block.
+The security policy lives in the `.github` repo, and GitHub shows it for every repo that has no `SECURITY.md` of its own.
+A repo-level `SECURITY.md` replaces the org policy entirely, so local copies are removed, like the other inherited community files.
+`API`, `Frontend` and `Firmware` keep hand-written policies; the `community` check verifies those still contain the shared reporting block.
+
+`CODEOWNERS` is not inherited, so every public repo gets its own copy.
 
 ### renovate.json
 
-Only repos that already have a `renovate.json` are kept in step, Renovate is never added to a repo.
+The shared policy lives in the presets in `renovate/`, which Renovate reads straight from this repo.
+Every repo owns its `renovate.json`: rules that only make sense for one repo are written there, after the presets.
 
-```
-renovate/                        presets, read by Renovate straight from this repo
-templates/renovate/
-  shared/renovate.json           the file every repo gets, it only extends the presets
-  repos/<Repo>/renovate.json     the whole file for a repo with needs of its own
-```
+The check only makes sure an existing `renovate.json` extends the presets, Renovate is never added to a repo.
+When it has to add them, it puts them first and drops whatever the presets already provide, so a repo's file is left with its own rules only.
+A file that already extends the presets is never touched again.
+
+A rule that turns out to belong to one repo is moved out of the presets through `renovate/handover/<Repo>.json`.
+The check writes the rules in that file into the repo's `renovate.json`, updating the repo's own rule when it matches the same packages.
+Once that pull request is merged the handover file is deleted, and the repo owns the rule from then on.
 
 Renovate opens a pull request for every update and merges minor, patch and digest updates itself once CI passes.
 Major updates always wait for a human.
@@ -124,7 +129,7 @@ The plan prints the commit each branch pointed at, so a deleted branch can be re
 Dependency updates belong to [Renovate](https://docs.renovatebot.com), which is installed on the org.
 That covers package versions, GitHub Actions versions and their SHA pins, and Docker image tags.
 org-sync does not generate `dependabot.yml` and does not bump or pin actions.
-Its only part in this is keeping existing `renovate.json` files pointed at the shared presets.
+Its only part in this is making sure existing `renovate.json` files extend the shared presets.
 
 ## Adding a check
 

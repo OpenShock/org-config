@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from orgsync import apply, gh
-from orgsync.checks import BY_NAME, actions, branches, community, files, msbuild, rulesets
+from orgsync.checks import BY_NAME, actions, branches, community, msbuild, renovate, rulesets
 from orgsync.config import Config
 from orgsync.model import Repo
 
@@ -209,48 +209,78 @@ class RulesetFiles(unittest.TestCase):
         self.assertIn('Tag Protection!', rulesets.desired_rulesets(Repo('Org', 'Other', 'main', 'abc', False), cfg))
 
     def test_folders_and_bypass_entries_must_name_a_repo(self):
-        cfg = self.config(extra={'templates/own/Gone/renovate.json': '{}'})
-        cfg.data['files'] = {'managed': [{'path': 'renovate.json', 'template': 't', 'overrides': 'templates/own'}]}
-        self.assertEqual(cfg.unknown_repos(['app', 'LIB', 'Other']), ['templates/own/Gone'])
+        cfg = self.config()
+        self.assertEqual(cfg.unknown_repos(['app', 'LIB', 'Other']), [])
         self.assertEqual(cfg.unknown_repos(['Other', 'Gone']), ['rulesets/repos/Lib', 'extra_bypass.app for rulesets/shared/reviews.json'])
 
 
-FILES_TOML = '''
-[[files.managed]]
-path = "renovate.json"
-template = "templates/shared.json"
-overrides = "templates/repos"
-only_existing = true
+RENOVATE_TOML = '''
+[renovate]
+source = "local>{org}/org-config//"
+presets = ["renovate/default.json", "renovate/automerge.json"]
 '''
+SHARED = ['local>Org/org-config//renovate/default', 'local>Org/org-config//renovate/automerge']
+GROUP = {'description': 'One PR', 'matchManagers': ['npm'], 'groupName': 'npm non-major'}
+OWN = {'description': 'Patched by hand', 'matchPackageNames': ['left-pad'], 'automerge': False}
 
 
-class ManagedFiles(unittest.TestCase):
+class Renovate(unittest.TestCase):
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        self.cfg = make_config(pathlib.Path(tmp.name), FILES_TOML, {
-            'templates/shared.json': 'shared',
-            'templates/repos/Special/renovate.json': 'special',
+        self.cfg = make_config(pathlib.Path(tmp.name), RENOVATE_TOML, {
+            'renovate/default.json': {'extends': ['config:recommended'], 'minimumReleaseAge': '3 days', 'packageRules': [GROUP]},
+            'renovate/automerge.json': {'automergeType': 'pr'},
         })
 
-    def repo(self, name: str, content: str | None) -> Repo:
-        repo = Repo('Org', name, 'main', 'abc', False)
+    def plan(self, content: object | None):
+        repo = Repo('Org', 'App', 'main', 'abc', False)
         if content is not None:
-            repo.tree, repo._files = ['renovate.json'], {'renovate.json': content}
-        return repo
+            text = content if isinstance(content, str) else json.dumps(content)
+            repo.tree, repo._files = ['renovate.json'], {'renovate.json': text}
+        return renovate.check(repo, self.cfg)
 
     def test_never_added_to_a_repo_without_it(self):
-        repo = self.repo('Plain', None)
-        self.assertEqual(files.check(repo, self.cfg).files, {})
-        self.assertEqual(files.managed_paths(repo, self.cfg), set())
+        self.assertFalse(self.plan(None).drift)
 
-    def test_existing_file_follows_the_shared_template(self):
-        self.assertEqual(files.check(self.repo('Plain', 'old'), self.cfg).files, {'renovate.json': 'shared'})
-        self.assertEqual(files.check(self.repo('Plain', 'shared'), self.cfg).files, {})
+    def test_file_that_extends_the_presets_is_left_alone(self):
+        result = self.plan({'extends': [*SHARED, 'config:recommended'], 'minimumReleaseAge': '3 days', 'packageRules': [GROUP, OWN]})
+        self.assertEqual((result.files, result.notes), ({}, []))
 
-    def test_repo_folder_replaces_the_shared_template(self):
-        self.assertEqual(files.check(self.repo('special', 'old'), self.cfg).files, {'renovate.json': 'special'})
+    def test_presets_are_added_and_what_they_provide_is_dropped(self):
+        result = self.plan({
+            '$schema': 'x',
+            'extends': ['config:recommended', ':dependencyDashboard'],
+            'minimumReleaseAge': '3 days',
+            'timezone': 'Europe/Oslo',
+            'packageRules': [{**GROUP, 'description': 'worded differently'}, OWN],
+        })
+        self.assertEqual(json.loads(result.files['renovate.json']), {
+            '$schema': 'x',
+            'extends': [*SHARED, ':dependencyDashboard'],
+            'timezone': 'Europe/Oslo',
+            'packageRules': [OWN],
+        })
+
+    def test_nothing_of_its_own_leaves_only_the_presets(self):
+        result = self.plan({'$schema': 'x', 'minimumReleaseAge': '3 days', 'packageRules': [GROUP]})
+        self.assertEqual(result.files['renovate.json'], '{\n  "$schema": "x",\n  "extends": ' + json.dumps(SHARED) + '\n}\n')
+
+    def test_handed_over_rule_is_added_or_updates_the_matching_one(self):
+        handed = {'matchPackageNames': ['left-pad'], 'groupName': None, 'automerge': False}
+        (self.cfg.root / 'renovate/handover').mkdir()
+        (self.cfg.root / 'renovate/handover/app.json').write_text(json.dumps({'packageRules': [handed]}), encoding='utf-8')
+        result = self.plan({'extends': SHARED})
+        self.assertEqual(json.loads(result.files['renovate.json']), {'extends': SHARED, 'packageRules': [handed]})
+        result = self.plan({'extends': SHARED, 'packageRules': [{'description': 'mine', 'matchPackageNames': ['left-pad'], 'groupName': None}]})
+        self.assertEqual(json.loads(result.files['renovate.json'])['packageRules'], [{'description': 'mine', **handed}])
+        self.assertFalse(self.plan({'extends': SHARED, 'packageRules': [{'description': 'mine', **handed}]}).drift)
+        self.assertEqual(self.cfg.unknown_repos(['Other']), ['renovate/handover/app.json'])
+
+    def test_unreadable_file_is_only_reported(self):
+        result = self.plan('{ // json5\n}')
+        self.assertEqual((result.files, len(result.notes)), ({}, 1))
 
 
 class Merge(unittest.TestCase):
@@ -278,6 +308,29 @@ class Community(unittest.TestCase):
         self.assertTrue(community.has_security_contact(community.CONTACT_LINK))
         self.assertFalse(community.has_security_contact('contact_links:\n  - name: x\n    url: https://discord.gg/x\n'))
         self.assertFalse(community.has_security_contact('blank_issues_enabled: false\n'))
+
+
+class CommunityRules(unittest.TestCase):
+
+    def test_removed_files_are_not_checked_for_content(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cfg = make_config(pathlib.Path(tmp.name), '''
+[[community.forbidden_files]]
+reason = "inherited"
+exclude = ["Own"]
+files = ["SECURITY\\\\.md"]
+delete = true
+[[community.must_not_contain]]
+reason = "wrong contact"
+files = ["SECURITY\\\\.md"]
+pattern = "admin@"
+''', {})
+        for name, files, notes in (('Plain', {'SECURITY.md': None}, []), ('Own', {}, ['SECURITY.md line 1: wrong contact'])):
+            repo = Repo('Org', name, 'main', 'abc', False)
+            repo.tree, repo._files = ['SECURITY.md'], {'SECURITY.md': 'mail admin@example.org'}
+            result = community.check(repo, cfg)
+            self.assertEqual((result.files, result.notes), (files, notes))
 
 
 class Branches(unittest.TestCase):
