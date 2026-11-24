@@ -283,6 +283,84 @@ class Renovate(unittest.TestCase):
         self.assertEqual((result.files, len(result.notes)), ({}, 1))
 
 
+class OpenPullRequest(unittest.TestCase):
+    """The PR branch is always rebuilt as the default branch plus one commit with the whole plan."""
+
+    FILES = {'CODEOWNERS': 'owners'}
+
+    def deliver(self, branch: dict | None, pr: bool = True, behind: int = 0, force_allowed: bool = True):
+        """`branch` maps the files the PR branch changes to their content there, None when there is no branch."""
+        repo = Repo('Org', 'App', 'main', 'abc', False)
+        calls, commits = [], []
+
+        def api(path, method='GET', body=None, paginate=False):
+            calls.append((method, path.removeprefix('repos/Org/App/'), body.get('sha') if body else None))
+            if '/pulls?' in path:
+                return [{'number': 7, 'html_url': 'old-pr'}] if pr else []
+            if method == 'GET' and '/git/ref/heads/' in path:
+                if path.endswith('-staging') or branch is None:
+                    raise gh.GhError(404, 'Not Found')
+                return {'object': {'sha': 'branch-head'}}
+            if '/compare/' in path:
+                return {'behind_by': behind, 'files': [{'filename': name} for name in branch]}
+            if method == 'PATCH' and '/git/refs/' in path and not force_allowed:
+                raise gh.GhError(422, 'Cannot force-push to this branch')
+            return {'html_url': 'new-pr'}
+
+        def commit(repo, name, head, files, title, body):
+            commits.append((name, head, files))
+            return {'oid': 'new-commit', 'url': 'commit-url'}
+
+        with mock.patch.object(gh, 'api', api), mock.patch.object(apply, '_commit', commit), \
+                mock.patch.object(apply, 'read_at', lambda slug, path, ref: (branch or {}).get(path)):
+            line = apply.deliver_files(repo, self.FILES, 'body', direct=False)
+        writes = [(method, path, sha) for method, path, sha in calls if method != 'GET']
+        return line, commits, writes
+
+    def test_first_run_opens_a_pr(self):
+        line, commits, writes = self.deliver(None, pr=False)
+        self.assertEqual(commits, [(apply.STAGING, 'abc', self.FILES)])
+        self.assertEqual(writes, [
+            ('POST', 'git/refs', 'abc'),
+            ('POST', 'git/refs', 'new-commit'),
+            ('DELETE', 'git/refs/heads/chore/org-sync-staging', None),
+            ('POST', 'pulls', None),
+        ])
+        self.assertEqual(line, 'opened new-pr')
+
+    def test_up_to_date_pr_is_left_alone(self):
+        line, commits, writes = self.deliver({'CODEOWNERS': 'owners'})
+        self.assertEqual((line, commits, writes), ('already proposed in old-pr', [], []))
+
+    def test_pr_is_rebuilt_when_it_proposes_something_else_or_fell_behind(self):
+        for branch, behind in (({'CODEOWNERS': 'owners', 'SECURITY.md': 'stub'}, 0), ({'CODEOWNERS': 'old'}, 0), ({'CODEOWNERS': 'owners'}, 2)):
+            line, commits, writes = self.deliver(branch, behind=behind)
+            # One commit on top of the default branch, and the PR's branch is moved to it.
+            self.assertEqual(commits, [(apply.STAGING, 'abc', self.FILES)])
+            self.assertEqual(writes, [
+                ('POST', 'git/refs', 'abc'),
+                ('PATCH', 'git/refs/heads/chore/org-sync', 'new-commit'),
+                ('DELETE', 'git/refs/heads/chore/org-sync-staging', None),
+                ('PATCH', 'pulls/7', None),
+            ])
+            self.assertEqual(line, 'updated old-pr')
+
+    def test_branch_is_replaced_where_force_pushes_are_forbidden(self):
+        line, _, writes = self.deliver({'CODEOWNERS': 'old'}, force_allowed=False)
+        self.assertEqual(writes[2:], [
+            ('DELETE', 'git/refs/heads/chore/org-sync', None),
+            ('POST', 'git/refs', 'new-commit'),
+            ('DELETE', 'git/refs/heads/chore/org-sync-staging', None),
+            ('POST', 'pulls', None),
+        ])
+        self.assertEqual(line, 'opened new-pr')
+
+    def test_leftover_branch_without_a_pr_is_replaced(self):
+        line, _, writes = self.deliver({'CODEOWNERS': 'old'}, pr=False)
+        self.assertEqual([w[:2] for w in writes][1:3], [('DELETE', 'git/refs/heads/chore/org-sync'), ('POST', 'git/refs')])
+        self.assertEqual(line, 'opened new-pr')
+
+
 class Merge(unittest.TestCase):
 
     def test_one_change_set_per_repo(self):

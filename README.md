@@ -48,7 +48,11 @@ All of them are configured in [`org.toml`](org.toml).
 | `branches` | Deletes orphaned `feat/`, `fix/`, `chore/`, ... branches | API, only with `--check branches` |
 
 All file changes for a repo arrive together: one commit on the `chore/org-sync` branch and one PR per repo, with the description grouped by check.
-Running `apply` again while that PR is open adds a commit to it instead of opening a second one.
+Running `apply` again while that PR is open updates it instead of opening a second one.
+The branch is rebuilt every time: the default branch as it is now, plus one commit with every planned change.
+So the PR never conflicts or falls behind, and never keeps something an earlier run proposed that is no longer planned.
+The branch belongs to the tool, changes pushed to it by hand are lost.
+Where a ruleset forbids force-pushes the branch is replaced instead, which closes the old PR and opens a new one.
 
 Lines starting with `!` in the plan are notes: things the tool noticed but will not change on its own.
 

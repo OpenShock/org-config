@@ -147,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if not args.yes:
         mode = 'one direct commit per repo' if args.direct else 'one pull request per repo'
-        answer = input(f'apply to {len(todo)} repo(s) as {login}, file changes as {mode}? [y/N] ')
+        try:
+            answer = input(f'apply to {len(todo)} repo(s) as {login}, file changes as {mode}? [y/N] ')
+        except EOFError:
+            print('\nnothing to answer the question, pass --yes to apply without asking')
+            return 2
         if answer.strip().lower() != 'y':
             print('aborted')
             return 1
