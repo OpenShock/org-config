@@ -10,18 +10,26 @@ exclude = []
 
 # Any section below also accepts `include`, `exclude` and `visibility = "public" | "private"`.
 
-# --- managed files: copied verbatim from a template, {org} and {repo} are substituted ---
+# --- managed files: copied from a template, {org}, {repo} and the rule's own `vars` are substituted ---
 
 # SECURITY.md is not managed: every repo inherits the policy in the .github repo, see community.forbidden_files.
 
-# Named users rather than a team: a team is ignored unless it has write access to the repo.
-# The four excluded repos get their CODEOWNERS from the security policy work.
+# Owners are always named users, never a team: a team is ignored unless it has write access to the repo.
 [[files.managed]]
 path = ".github/CODEOWNERS"
 template = "templates/CODEOWNERS"
 visibility = "public"
-exclude = [".github", "API", "Frontend", "Firmware"]
+exclude = [".github"]
 remove = ["CODEOWNERS", "docs/CODEOWNERS"]
+# {owners} is who reviews everything else, /SECURITY.md and /.github/ stay with the two maintainers.
+vars = { owners = "@hhvrc @LucHeart" }
+
+# Repos with more default owners than the two maintainers.
+[files.managed.repo_vars]
+3DPrints = { owners = "@nullstalgia @LucHeart @hhvrc" }
+Firmware = { owners = "@hhvrc @nullstalgia @LucHeart" }
+Hardware = { owners = "@nullstalgia @LucHeart @hhvrc" }
+flatbuffers-schemas = { owners = "@hhvrc @LucHeart @nullstalgia" }
 
 # --- renovate.json: every repo owns its rules ---
 # The only thing enforced is that an existing renovate.json extends the shared presets in renovate/.

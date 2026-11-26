@@ -41,6 +41,8 @@ class Config:
         problems += [f'{handover}/{f.name}' for f in sorted(self.path(handover).glob('*.json')) if f.stem.lower() not in known]
         for rule in self.section('rulesets').get('managed', []):
             problems += [f'extra_bypass.{name} for {rule["file"]}' for name in rule.get('extra_bypass', {}) if name.lower() not in known]
+        for rule in self.section('files').get('managed', []):
+            problems += [f'repo_vars.{name} for {rule["path"]}' for name in rule.get('repo_vars', {}) if name.lower() not in known]
         return problems
 
 

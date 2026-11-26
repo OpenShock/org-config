@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from orgsync import apply, gh
-from orgsync.checks import BY_NAME, actions, branches, community, msbuild, renovate, rulesets
+from orgsync.checks import BY_NAME, actions, branches, community, files, msbuild, renovate, rulesets
 from orgsync.config import Config
 from orgsync.model import Repo
 
@@ -281,6 +281,31 @@ class Renovate(unittest.TestCase):
     def test_unreadable_file_is_only_reported(self):
         result = self.plan('{ // json5\n}')
         self.assertEqual((result.files, len(result.notes)), ({}, 1))
+
+
+class ManagedFiles(unittest.TestCase):
+
+    def test_template_is_filled_in_per_repo(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cfg = make_config(pathlib.Path(tmp.name), '''
+[[files.managed]]
+path = ".github/CODEOWNERS"
+template = "templates/CODEOWNERS"
+remove = ["CODEOWNERS"]
+vars = { owners = "@a @b" }
+[files.managed.repo_vars]
+lib = { owners = "@a @b @c" }
+''', {'templates/CODEOWNERS': '* {owners}\n/docs/ @a # {org}/{repo}\n'})
+        for name, owners in (('App', '@a @b'), ('Lib', '@a @b @c')):
+            repo = Repo('Org', name, 'main', 'abc', False)
+            repo.tree, repo._files = ['CODEOWNERS'], {}
+            wanted = f'* {owners}\n/docs/ @a # Org/{name}\n'
+            self.assertEqual(files.check(repo, cfg).files, {'.github/CODEOWNERS': wanted, 'CODEOWNERS': None})
+            repo.tree, repo._files = ['.github/CODEOWNERS'], {'.github/CODEOWNERS': wanted}
+            self.assertFalse(files.check(repo, cfg).drift)
+        self.assertEqual(cfg.unknown_repos(['App', 'Lib']), [])
+        self.assertEqual(cfg.unknown_repos(['App']), ['repo_vars.lib for .github/CODEOWNERS'])
 
 
 class OpenPullRequest(unittest.TestCase):

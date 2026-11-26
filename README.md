@@ -38,7 +38,7 @@ All of them are configured in [`org.toml`](org.toml).
 
 | Check | Keeps even | How it is applied |
 | --- | --- | --- |
-| `files` | Managed files such as `CODEOWNERS`, copied from `templates/` | PR |
+| `files` | Managed files such as `CODEOWNERS`, filled in from `templates/` | PR |
 | `renovate` | An existing `renovate.json` extends the shared presets | PR |
 | `community` | Rules about community files: required, forbidden, must contain, must not contain; issue template security link | Notes, PR for a missing issue template `config.yml` |
 | `actions` | An allowlist of actions, and banned actions | Notes, PR for a rewritten banned action |
@@ -63,6 +63,8 @@ A repo-level `SECURITY.md` replaces the org policy entirely, so local copies are
 `API`, `Frontend` and `Firmware` keep hand-written policies; the `community` check verifies those still contain the shared reporting block.
 
 `CODEOWNERS` is not inherited, so every public repo gets its own copy.
+Owners are named users, never a team.
+The default owners come from `vars` in `org.toml`, and a repo with more of them is listed under `repo_vars`.
 
 ### renovate.json
 

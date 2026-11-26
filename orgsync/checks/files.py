@@ -1,4 +1,4 @@
-"""Managed files: copied verbatim from a template into every matching repo."""
+"""Managed files: copied from a template into every matching repo, with a few placeholders filled in."""
 
 from ..config import Config, applies
 from ..model import Repo, Result
@@ -8,11 +8,18 @@ def _managed(repo: Repo, cfg: Config) -> list[dict]:
     return [r for r in cfg.section('files').get('managed', []) if applies(repo, r)]
 
 
+def render(template: str, repo: Repo, rule: dict) -> str:
+    """Fills in {org}, {repo} and the rule's `vars`, where `repo_vars` holds what one repo does differently."""
+    own = next((v for name, v in rule.get('repo_vars', {}).items() if name.lower() == repo.name.lower()), {})
+    for key, value in {**rule.get('vars', {}), **own, 'org': repo.org, 'repo': repo.name}.items():
+        template = template.replace('{' + key + '}', value)
+    return template
+
+
 def check(repo: Repo, cfg: Config) -> Result:
     result = Result()
     for rule in _managed(repo, cfg):
-        template = cfg.path(rule['template']).read_text(encoding='utf-8')
-        wanted = template.replace('{org}', repo.org).replace('{repo}', repo.name)
+        wanted = render(cfg.path(rule['template']).read_text(encoding='utf-8'), repo, rule)
         path = rule['path']
         current = repo.read(path)
         if current != wanted:
