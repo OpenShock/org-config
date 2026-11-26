@@ -59,28 +59,32 @@ def _matchers(rule: dict) -> dict:
     return {k: v for k, v in rule.items() if k.startswith('match')}
 
 
-def handed_over(repo: Repo, cfg: Config) -> list[dict]:
-    """Rules waiting in the handover folder for this repo, see the README."""
+def handed_over(repo: Repo, cfg: Config) -> dict:
+    """What waits in the handover folder for this repo: package rules and plain settings, see the README."""
     folder = cfg.path(cfg.section('renovate').get('handover', 'renovate/handover'))
-    return [
-        rule
-        for path in sorted(folder.glob('*.json')) if path.stem.lower() == repo.name.lower()
-        for rule in json.loads(path.read_text(encoding='utf-8')).get('packageRules', [])
-    ]
+    waiting: dict = {}
+    for path in sorted(folder.glob('*.json')):
+        if path.stem.lower() == repo.name.lower():
+            waiting.update(json.loads(path.read_text(encoding='utf-8')))
+    return {k: v for k, v in waiting.items() if k not in ('$schema', 'description', 'extends')}
 
 
-def hand_over(config: dict, rules: list[dict]) -> dict:
-    """Makes sure the file carries each rule, updating the repo's own rule when it matches the same things."""
-    if not rules:
-        return config
+def hand_over(config: dict, waiting: dict) -> dict:
+    """Makes sure the file carries each setting and each rule, updating the repo's own rule when it matches the same things."""
+    settings = {k: v for k, v in waiting.items() if k != 'packageRules'}
     own = [dict(r) for r in config.get('packageRules', [])]
-    for rule in rules:
+    for rule in waiting.get('packageRules', []):
         existing = next((r for r in own if _matchers(r) == _matchers(rule)), None)
         if existing is None:
             own.append(dict(rule))
         else:
             existing.update(rule)
-    return {**config, 'packageRules': own}
+    # Settings go where the repo already has them, new ones before the rules.
+    updated = {k: settings.get(k, v) for k, v in config.items() if k != 'packageRules'}
+    updated.update(settings)
+    if own:
+        updated['packageRules'] = own
+    return updated
 
 
 def dump(value, depth: int = 0) -> str:
@@ -117,11 +121,16 @@ def check(repo: Repo, cfg: Config) -> Result:
         presets = [json.loads(cfg.path(p).read_text(encoding='utf-8')) for p in section['presets']]
         updated = adopt(config, wanted, presets)
         result.details.append(f'`{path}`: extend {", ".join(f"`{m}`" for m in missing)}, drop what the presets already provide')
-    rules = handed_over(repo, cfg)
-    if hand_over(updated, rules) != updated:
-        updated = hand_over(updated, rules)
-        subjects = ', '.join(f'`{name}`' for rule in rules for name in rule.get('matchPackageNames', ['...']))
-        result.details.append(f'`{path}`: this repo now carries the rule for {subjects} itself, it is leaving the shared presets')
+    waiting = handed_over(repo, cfg)
+    if hand_over(updated, waiting) != updated:
+        updated = hand_over(updated, waiting)
+        rules = waiting.get('packageRules', [])
+        if rules:
+            subjects = ', '.join(f'`{name}`' for rule in rules for name in rule.get('matchPackageNames', ['...']))
+            result.details.append(f'`{path}`: this repo now carries the rule for {subjects} itself, it is leaving the shared presets')
+        settings = [f'`{key}`' for key in waiting if key != 'packageRules']
+        if settings:
+            result.details.append(f'`{path}`: set {", ".join(settings)}, which only this repo needs')
     if updated != config:
         result.files[path] = dump(updated) + '\n'
     return result

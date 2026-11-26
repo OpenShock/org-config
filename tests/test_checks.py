@@ -278,6 +278,15 @@ class Renovate(unittest.TestCase):
         self.assertFalse(self.plan({'extends': SHARED, 'packageRules': [{'description': 'mine', **handed}]}).drift)
         self.assertEqual(self.cfg.unknown_repos(['Other']), ['renovate/handover/app.json'])
 
+    def test_handed_over_settings_are_set_before_the_rules(self):
+        (self.cfg.root / 'renovate/handover').mkdir()
+        (self.cfg.root / 'renovate/handover/app.json').write_text(json.dumps({'cloneSubmodules': True, 'schedule': ['daily']}), encoding='utf-8')
+        result = self.plan({'extends': SHARED, 'schedule': ['weekly'], 'packageRules': [OWN]})
+        self.assertEqual(list(json.loads(result.files['renovate.json']).items()), [
+            ('extends', SHARED), ('schedule', ['daily']), ('cloneSubmodules', True), ('packageRules', [OWN]),
+        ])
+        self.assertFalse(self.plan({'extends': SHARED, 'schedule': ['daily'], 'cloneSubmodules': True}).drift)
+
     def test_unreadable_file_is_only_reported(self):
         result = self.plan('{ // json5\n}')
         self.assertEqual((result.files, len(result.notes)), ({}, 1))

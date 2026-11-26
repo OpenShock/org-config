@@ -1,0 +1,4 @@
+{
+  "cloneSubmodules": true,
+  "cloneSubmodulesFilter": ["frontend/packages/svelte-core"]
+}

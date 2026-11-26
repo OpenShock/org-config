@@ -76,6 +76,7 @@ When it has to add them, it puts them first and drops whatever the presets alrea
 A file that already extends the presets is never touched again.
 
 A rule that turns out to belong to one repo is moved out of the presets through `renovate/handover/<Repo>.json`.
+The same file can hand a repo a plain setting only it needs, such as `cloneSubmodules`.
 The check writes the rules in that file into the repo's `renovate.json`, updating the repo's own rule when it matches the same packages.
 Once that pull request is merged the handover file is deleted, and the repo owns the rule from then on.
 

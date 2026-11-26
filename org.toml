@@ -42,7 +42,7 @@ path = "renovate.json"
 # How Renovate reaches this repo, the preset's path without .json is appended.
 source = "local>{org}/org-config//"
 presets = ["renovate/default.json", "renovate/automerge.json"]
-# A rule that leaves the presets for the one repo that needs it waits in renovate/handover/<Repo>.json
+# A rule that leaves the presets for the one repo that needs it, or a setting only that repo needs, waits in renovate/handover/<Repo>.json
 # until that repo's renovate.json carries it. Delete the file once that is merged, the repo owns the rule from then on.
 
 # --- community health files ---
