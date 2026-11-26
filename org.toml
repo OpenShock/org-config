@@ -24,8 +24,9 @@ remove = ["CODEOWNERS", "docs/CODEOWNERS"]
 # {owners} is who reviews everything else, /SECURITY.md and /.github/ stay with the two maintainers.
 vars = { owners = "@hhvrc @LucHeart" }
 
-# Repos with more default owners than the two maintainers.
+# Repos whose default owners differ from that, in who they are or in who is asked first.
 [files.managed.repo_vars]
+API = { owners = "@LucHeart @hhvrc" }
 3DPrints = { owners = "@nullstalgia @LucHeart @hhvrc" }
 Firmware = { owners = "@hhvrc @nullstalgia @LucHeart" }
 Hardware = { owners = "@nullstalgia @LucHeart @hhvrc" }
